@@ -4,22 +4,15 @@
 library(readxl)
 library(dplyr)
 
-CBBPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\CollegeBasketballPlayers2009-2021.xlsx")
-DraftedPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\DraftedPlayers2009-2021.xlsx")
+CBBPlayers <- read_excel("/Users/naitikrambhia/Downloads/CollegeBasketballPlayers2009-2021.xlsx")
+DraftedPlayers <- read_excel("/Users/naitikrambhia/Downloads/DraftedPlayers2009-2021.xlsx")
 
 head(CBBPlayers)
 head(DraftedPlayers)
 
-# Filtering for the most recent year of the CBB players career(the year they got drafted)
-
-CBBPlayers_Recent <- CBBPlayers %>%
-  group_by(player_name) %>%
-  filter(year == max(year, na.rm = TRUE)) %>%
-  ungroup()
-
 # Mutating the dataset
 
-CBBPlayers_Recent <- CBBPlayers_Recent %>%
+CBBPlayers <- CBBPlayers %>%
   mutate(
     Ortg_percentile    = percent_rank(Ortg) * 100,
     usg_percentile     = percent_rank(usg) * 100,
@@ -39,7 +32,7 @@ CBBPlayers_Recent <- CBBPlayers_Recent %>%
     dporpag_percentile = percent_rank(dporpag) * 100
   )
 
-full_dataset_player_percentiles <- CBBPlayers_Recent %>%
+full_dataset_player_percentiles <- CBBPlayers %>%
   select(player_name, ends_with("_percentile"))
 
 # Making a list of players
@@ -97,10 +90,6 @@ players_of_interest <- c(
   "Lauri Markkanen"
 )
 
-
-# Testing view
-
-full_dataset_player_percentiles %>%
-  filter(player_name == "Caleb Swanigan")
-
-
+CBBPlayers %>%
+  filter(player_name == "Caleb Swanigan") %>%
+  select(player_name, ends_with("_percentile"))
