@@ -4,8 +4,14 @@
 library(readxl)
 library(dplyr)
 
+
 CBBPlayers <- read_excel("/Users/naitikrambhia/Downloads/CollegeBasketballPlayers2009-2021.xlsx")
 DraftedPlayers <- read_excel("/Users/naitikrambhia/Downloads/DraftedPlayers2009-2021.xlsx")
+
+CBBPlayers_Recent <- CBBPlayers %>%
+  group_by(player_name) %>%
+  filter(year == max(year, na.rm = TRUE)) %>%
+  ungroup()
 
 head(CBBPlayers)
 head(DraftedPlayers)
