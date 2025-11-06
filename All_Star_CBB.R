@@ -3,8 +3,9 @@
 
 library(readxl)
 library(dplyr)
+library(stringr)
 
-CBBPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\CollegeBasketballPlayers2009-2021.xlsx")
+CBBPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\CBBPlayers_with_Positions.xlsx")
 DraftedPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\DraftedPlayers2009-2021.xlsx")
 
 head(CBBPlayers)
@@ -100,7 +101,24 @@ players_of_interest <- c(
 
 # Testing view
 
-full_dataset_player_percentiles %>%
-  filter(player_name == "Caleb Swanigan")
+interest_percentiles <- interest_percentiles %>%
+  mutate(simple_pos = factor(simple_pos, levels = c("G", "F", "C")))
+
+interest_percentiles %>%
+  arrange(simple_pos, player_name) %>%
+  group_by(simple_pos) %>%
+  do(print(., n = Inf))
 
 
+interest_percentiles %>%
+  arrange(simple_pos, player_name) %>%
+  group_by(simple_pos) %>%
+  group_walk(~ {
+    pos <- as.character(.y$simple_pos)
+    
+    cat("\n\n========================\n")
+    cat("Position:", pos, "\n")
+    cat("========================\n")
+    
+    print(.x, n = Inf, width = Inf)
+  })
