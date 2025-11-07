@@ -4,8 +4,8 @@
 library(readxl)
 library(dplyr)
 
-CBBPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\CollegeBasketballPlayers2009-2021.xlsx")
-DraftedPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\DraftedPlayers2009-2021.xlsx")
+CBBPlayers <- read_excel("C:\Users\kwame\OneDrive\Documents\GitHub\SAP_CBB_AllStar\CBBPlayers_with_Positions.xlsx")
+DraftedPlayers <- read_excel("C:\Users\kwame\OneDrive\Documents\GitHub\SAP_CBB_AllStar\DraftedPlayers2009-2021.xlsx")
 
 head(CBBPlayers)
 head(DraftedPlayers)
