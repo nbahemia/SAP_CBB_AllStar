@@ -1,124 +1,93 @@
-# All-Star College Basketball Player Project
-# Years covered, 2009 - 2021.
-
-library(readxl)
 library(dplyr)
-library(stringr)
+library(readxl)
+library(ggplot2)
+library(reshape2)
 
+# Load data
 CBBPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\CBBPlayers_with_Positions.xlsx")
-DraftedPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\DraftedPlayers2009-2021.xlsx")
 
-head(CBBPlayers)
-head(DraftedPlayers)
-
-# Filtering for the most recent year of the CBB players career(the year they got drafted)
-
+# Filter for most recent year per player
 CBBPlayers_Recent <- CBBPlayers %>%
   group_by(player_name) %>%
   filter(year == max(year, na.rm = TRUE)) %>%
-  ungroup()
-
-# Mutating the dataset
-
-CBBPlayers_Recent <- CBBPlayers_Recent %>%
+  ungroup() %>%
   mutate(
-    Ortg_percentile    = percent_rank(Ortg) * 100,
-    usg_percentile     = percent_rank(usg) * 100,
-    eFG_percentile     = percent_rank(eFG) * 100,
-    TS_per_percentile  = percent_rank(TS_per) * 100,
-    ORB_per_percentile = percent_rank(ORB_per) * 100,
-    DRB_per_percentile = percent_rank(DRB_per) * 100,
-    AST_per_percentile = percent_rank(AST_per) * 100,
-    TO_per_percentile  = percent_rank(TO_per) * 100,
-    blk_per_percentile = percent_rank(blk_per) * 100,
-    stl_per_percentile = percent_rank(stl_per) * 100,
-    porpag_percentile  = percent_rank(porpag) * 100,
-    adjoe_percentile   = percent_rank(adjoe) * 100,
-    ast_tov_percentile = percent_rank(`ast/tov`) * 100,
-    drtg_percentile    = percent_rank(drtg) * 100,
-    adrtg_percentile   = percent_rank(adrtg) * 100,
-    dporpag_percentile = percent_rank(dporpag) * 100
+    simple_pos = factor(simple_pos, levels = c("G", "F", "C"))
   )
 
-full_dataset_player_percentiles <- CBBPlayers_Recent %>%
-  select(player_name, ends_with("_percentile"))
-
-# Making a list of players
-
-players_of_interest <- c(
-  "Anthony Davis",
-  "Bam Adebayo",
-  "Bradley Beal",
-  "Damian Lillard",
-  "DeMarcus Cousins",
-  "Devin Booker",
-  "Donovan Mitchell",
-  "Draymond Green",
-  "Gordon Hayward",
-  "Isaiah Thomas",
-  "Jayson Tatum",
-  "Jaylen Brown",
-  "Jimmy Butler",
-  "John Wall",
-  "Julius Randle",
-  "Karl-Anthony Towns",
-  "Kawhi Leonard",
-  "Kemba Walker",
-  "Khris Middleton",
-  "Klay Thompson",
-  "Kyrie Irving",
-  "Nikola Vučević",
-  "Paul George",
-  "Trae Young",
-  "Victor Oladipo",
-  "Zach LaVine",
-  "Zion Williamson",
-  "Ben Simmons",
-  "Brandon Ingram",
-  "Pascal Siakam",
-  "D’Angelo Russell",
-  "Domantas Sabonis",
-  "Ja Morant",
-  "Dejounte Murray",
-  "Jarrett Allen",
-  "Andrew Wiggins",
-  "Shai Gilgeous-Alexander",
-  "Jalen Williams",
-  "Evan Mobley",
-  "Jaren Jackson Jr.",
-  "Jalen Brunson",
-  "Cade Cunningham",
-  "Tyler Herro",
-  "Darius Garland",
-  "Anthony Edwards",
-  "Tyrese Maxey",
-  "Tyrese Haliburton",
-  "Paolo Banchero",
-  "Fred VanVleet",
-  "Lauri Markkanen"
+# Players of interest
+players_of_interest <- tibble::tibble(
+  player_name = c(
+    "Andrew Wiggins", "Anthony Davis", "Anthony Edwards", "Edrice Adebayo",
+    "Ben Simmons", "Bradley Beal", "Brandon Ingram", "Cade Cunningham",
+    "D'Angelo Russell", "Damian Lillard", "Darius Garland", "Dejounte Murray",
+    "DeMarcus Cousins", "Devin Booker", "Domantas Sabonis", "Donovan Mitchell",
+    "Draymond Green", "Evan Mobley", "Fred VanVleet", "Gordon Hayward",
+    "Isaiah Thomas", "Ja Morant", "Jalen Brunson", "Jalen Williams",
+    "Jaren Jackson Jr.", "Jarrett Allen", "Jaylen Brown", "Jayson Tatum",
+    "Jimmy Butler", "John Wall", "Julius Randle", "Karl-Anthony Towns",
+    "Kawhi Leonard", "Kemba Walker", "Khris Middleton", "Klay Thompson",
+    "Kyrie Irving", "Lauri Markkanen", "Nikola Vucević",
+    "Pascal Siakam", "Paul George", "Shai Gilgeous-Alexander", "Trae Young",
+    "Tyler Herro", "Tyrese Haliburton", "Tyrese Maxey", "Victor Oladipo",
+    "Zach LaVine", "Zion Williamson"
+  )
 )
 
+# Compute percentiles for ALL players
+CBBPlayers_percentiles <- CBBPlayers_Recent %>%
+  mutate(
+    Ortg_pct    = percent_rank(Ortg) * 100,
+    usg_pct     = percent_rank(usg) * 100,
+    eFG_pct     = percent_rank(eFG) * 100,
+    TS_pct      = percent_rank(TS_per) * 100,
+    ORB_pct     = percent_rank(ORB_per) * 100,
+    DRB_pct     = percent_rank(DRB_per) * 100,
+    AST_pct     = percent_rank(AST_per) * 100,
+    TO_pct      = percent_rank(TO_per) * 100,
+    blk_pct     = percent_rank(blk_per) * 100,
+    stl_pct     = percent_rank(stl_per) * 100,
+    porpag_pct  = percent_rank(porpag) * 100,
+    adjoe_pct   = percent_rank(adjoe) * 100,
+    ast_tov_pct = percent_rank(`ast/tov`) * 100,
+    drtg_pct    = percent_rank(drtg) * 100,
+    adrtg_pct   = percent_rank(adrtg) * 100,
+    dporpag_pct = percent_rank(dporpag) * 100
+  )
 
-# Testing view
+# Label dataset with all-star info AND keep positions
+CBBPlayers_labeled <- CBBPlayers_percentiles %>%
+  mutate(
+    simple_pos = factor(simple_pos, levels = c("G", "F", "C")),
+    is_all_star = ifelse(player_name %in% players_of_interest$player_name, 1, 0)
+  )
 
-interest_percentiles <- interest_percentiles %>%
-  mutate(simple_pos = factor(simple_pos, levels = c("G", "F", "C")))
+# Verify simple_pos is valid
+print(table(CBBPlayers_labeled$simple_pos))
 
-interest_percentiles %>%
-  arrange(simple_pos, player_name) %>%
-  group_by(simple_pos) %>%
-  do(print(., n = Inf))
+# Percentile columns
+percentile_cols <- grep("_pct$", names(CBBPlayers_labeled), value = TRUE)
 
+# Correlation function
+get_position_cor <- function(pos) {
+  CBBPlayers_labeled %>%
+    filter(simple_pos == pos) %>%
+    select(is_all_star, all_of(percentile_cols)) %>%
+    cor(use = "pairwise.complete.obs") %>%
+    .["is_all_star", ]
+}
 
-interest_percentiles %>%
-  arrange(simple_pos, player_name) %>%
-  group_by(simple_pos) %>%
-  group_walk(~ {
-    pos <- as.character(.y$simple_pos)
-    
-    cat("\n\n========================\n")
-    cat("Position:", pos, "\n")
-    cat("========================\n")
-    
-    print(.x, n = Inf, width = Inf)
-  })
+# Correlations per position
+cor_G <- get_position_cor("G")
+cor_F <- get_position_cor("F")
+cor_C <- get_position_cor("C")
+
+# Combined table
+cor_by_pos <- data.frame(
+  stat = names(cor_G),
+  Guards = as.numeric(cor_G),
+  Forwards = as.numeric(cor_F),
+  Centers = as.numeric(cor_C)
+)
+
+cor_by_pos
