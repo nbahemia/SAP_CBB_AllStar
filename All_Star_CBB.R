@@ -4,77 +4,118 @@
 library(dplyr)
 library(readxl)
 library(ggplot2)
+library(tibble)
 
-# -------------------------------
-# Load data
-# -------------------------------
-CBBPlayers <- read_excel("C:\\Users\\naeem\\OneDrive\\Documents\\GitHub\\SAP_CBB_AllStar\\CBBPlayers_with_Positions.xlsx")
+# ============================================================
+# 1. Load dataset
+# ============================================================
+CBBPlayers <- read_excel(
+  "C:/Users/naeem/OneDrive/Documents/GitHub/SAP_CBB_AllStar/CBBPlayers_with_Positions.xlsx"
+)
 
-# -------------------------------
-# Filter for most recent year per player
-# -------------------------------
-CBBPlayers_Recent <- CBBPlayers %>%
-  group_by(player_name, team) %>%  # use team to distinguish duplicates
+# ============================================================
+# 2. All-Star Lookup Table (Name, School, College Years)
+# ============================================================
+allstars_lookup <- tribble(
+  ~player_name,              ~team,              ~start_year, ~end_year,
+  "Andrew Wiggins",          "Kansas",            2013,        2014,
+  "Anthony Davis",           "Kentucky",          2011,        2012,
+  "Anthony Edwards",         "Georgia",           2019,        2020,
+  "Edrice Adebayo",          "Kentucky",          2016,        2017,
+  "Ben Simmons",             "LSU",               2015,        2016,
+  "Bradley Beal",            "Florida",           2011,        2012,
+  "Brandon Ingram",          "Duke",              2015,        2016,
+  "Cade Cunningham",         "Oklahoma State",    2020,        2021,
+  "D'Angelo Russell",        "Ohio State",        2014,        2015,
+  "Damian Lillard",          "Weber State",       2008,        2012,
+  "Darius Garland",          "Vanderbilt",        2018,        2019,
+  "Dejounte Murray",         "Washington",        2015,        2016,
+  "DeMarcus Cousins",        "Kentucky",          2009,        2010,
+  "Devin Booker",            "Kentucky",          2014,        2015,
+  "Domantas Sabonis",        "Gonzaga",           2014,        2016,
+  "Donovan Mitchell",        "Louisville",        2015,        2017,
+  "Draymond Green",          "Michigan State",    2008,        2012,
+  "Evan Mobley",             "USC",               2020,        2021,
+  "Fred VanVleet",           "Wichita State",     2012,        2016,
+  "Gordon Hayward",          "Butler",            2008,        2010,
+  "Isaiah Thomas",           "Washington",        2008,        2011,
+  "Ja Morant",               "Murray State",      2017,        2019,
+  "Jalen Brunson",           "Villanova",         2015,        2018,
+  "Jalen Williams",          "Santa Clara",       2019,        2022,
+  "Jaren Jackson Jr.",       "Michigan State",    2017,        2018,
+  "Jarrett Allen",           "Texas",             2016,        2017,
+  "Jaylen Brown",            "California",        2015,        2016,
+  "Jayson Tatum",            "Duke",              2016,        2017,
+  "Jimmy Butler",            "Marquette",         2008,        2011,
+  "John Wall",               "Kentucky",          2009,        2010,
+  "Julius Randle",           "Kentucky",          2013,        2014,
+  "Karl-Anthony Towns",      "Kentucky",          2014,        2015,
+  "Kawhi Leonard",           "San Diego State",   2009,        2011,
+  "Kemba Walker",            "UConn",             2008,        2011,
+  "Khris Middleton",         "Texas A&M",         2009,        2012,
+  "Klay Thompson",           "Washington State",  2008,        2011,
+  "Kyrie Irving",            "Duke",              2010,        2011,
+  "Lauri Markkanen",         "Arizona",           2016,        2017,
+  "Nikola Vucević",          "USC",               2008,        2011,
+  "Paolo Banchero",          "Duke",              2021,        2022,
+  "Pascal Siakam",           "New Mexico State",  2014,        2016,
+  "Paul George",             "Fresno State",      2008,        2010,
+  "Shai Gilgeous-Alexander", "Kentucky",          2017,        2018,
+  "Trae Young",              "Oklahoma",          2017,        2018,
+  "Tyler Herro",             "Kentucky",          2018,        2019,
+  "Tyrese Haliburton",       "Iowa State",        2018,        2020,
+  "Tyrese Maxey",            "Kentucky",          2019,        2020,
+  "Victor Oladipo",          "Indiana",           2010,        2013,
+  "Zach LaVine",             "UCLA",              2013,        2014,
+  "Zion Williamson",         "Duke",              2018,        2019
+)
+
+# ============================================================
+# 3. Join lookup BEFORE selecting most recent season
+# ============================================================
+CBBPlayers_labeled <- CBBPlayers %>%
+  left_join(allstars_lookup, by = c("player_name", "team")) %>%
+  mutate(
+    is_all_star = ifelse(!is.na(start_year) & year >= start_year & year <= end_year, 1, 0)
+  ) %>%
+  select(-start_year, -end_year)
+
+# ============================================================
+# 4. Select most recent year per player
+# ============================================================
+CBBPlayers_Recent <- CBBPlayers_labeled %>%
+  group_by(player_name) %>%
   filter(year == max(year, na.rm = TRUE)) %>%
   ungroup() %>%
   mutate(simple_pos = factor(simple_pos, levels = c("G", "F", "C")))
 
-# -------------------------------
-# All-Star Players
-# -------------------------------
-players_of_interest <- c(
-  "Andrew Wiggins", "Anthony Davis", "Anthony Edwards", "Edrice Adebayo",
-  "Ben Simmons", "Bradley Beal", "Brandon Ingram", "Cade Cunningham",
-  "D'Angelo Russell", "Damian Lillard", "Darius Garland", "Dejounte Murray",
-  "DeMarcus Cousins", "Devin Booker", "Domantas Sabonis", "Donovan Mitchell",
-  "Draymond Green", "Evan Mobley", "Fred VanVleet", "Gordon Hayward",
-  "Isaiah Thomas", "Ja Morant", "Jalen Brunson", "Jalen Williams",
-  "Jaren Jackson Jr.", "Jarrett Allen", "Jaylen Brown", "Jayson Tatum",
-  "Jimmy Butler", "John Wall", "Julius Randle", "Karl-Anthony Towns",
-  "Kawhi Leonard", "Kemba Walker", "Khris Middleton", "Klay Thompson",
-  "Kyrie Irving", "Lauri Markkanen", "Nikola Vucević",
-  "Pascal Siakam", "Paul George", "Shai Gilgeous-Alexander", "Trae Young",
-  "Tyler Herro", "Tyrese Haliburton", "Tyrese Maxey", "Victor Oladipo",
-  "Zach LaVine", "Zion Williamson"
-)
-
-# -------------------------------
-# Add All-Star label
-# -------------------------------
-CBBPlayers_labeled <- CBBPlayers_Recent %>%
-  mutate(is_all_star = ifelse(player_name %in% players_of_interest, 1, 0))
-
-# -------------------------------
-# Raw stats to use in GLM
-# -------------------------------
+# ============================================================
+# 5. Raw stats to use in GLM
+# ============================================================
 raw_stats <- c(
   "Ortg", "usg", "eFG", "TS_per", "ORB_per", "DRB_per", "AST_per",
   "TO_per", "blk_per", "stl_per", "porpag", "adjoe", "`ast/tov`",
   "drtg", "adrtg", "dporpag"
 )
 
-# -------------------------------
-# Full GLM formula
-# -------------------------------
-full_formula <- as.formula(paste("is_all_star ~", paste(raw_stats, collapse = " + ")))
+full_formula <- as.formula(
+  paste("is_all_star ~", paste(raw_stats, collapse = " + "))
+)
 
-# -------------------------------
-# Fit GLM by position
-# -------------------------------
-glm_G <- glm(full_formula, data = CBBPlayers_labeled %>% filter(simple_pos == "G"), family = "binomial")
-glm_F <- glm(full_formula, data = CBBPlayers_labeled %>% filter(simple_pos == "F"), family = "binomial")
-glm_C <- glm(full_formula, data = CBBPlayers_labeled %>% filter(simple_pos == "C"), family = "binomial")
+# ============================================================
+# 6. Fit GLMs by position
+# ============================================================
+glm_G <- glm(full_formula, data = CBBPlayers_Recent %>% filter(simple_pos == "G"), family = "binomial")
+glm_F <- glm(full_formula, data = CBBPlayers_Recent %>% filter(simple_pos == "F"), family = "binomial")
+glm_C <- glm(full_formula, data = CBBPlayers_Recent %>% filter(simple_pos == "C"), family = "binomial")
 
-# -------------------------------
-# Summaries
-# -------------------------------
 summary(glm_G)
 summary(glm_F)
 summary(glm_C)
 
-# -------------------------------
-# Bar plot of coefficients
-# -------------------------------
+# ============================================================
+# 7. Coefficient barplot function
+# ============================================================
 plot_glm_coefs <- function(glm_model, pos_name) {
   coefs <- data.frame(
     stat = names(coef(glm_model))[-1],
