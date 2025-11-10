@@ -64,7 +64,6 @@ allstars_lookup <- tribble(
   "Kyrie Irving",            "Duke",              2010,        2011,
   "Lauri Markkanen",         "Arizona",           2016,        2017,
   "Nikola Vucevic",          "USC",               2008,        2011,
-  "Paolo Banchero",          "Duke",              2021,        2022,
   "Pascal Siakam",           "New Mexico St.",    2014,        2016,
   "Paul George",             "Fresno St.",        2008,        2010,
   "Shai Gilgeous-Alexander", "Kentucky",          2017,        2018,
@@ -140,3 +139,5 @@ plot_glm_coefs <- function(glm_model, pos_name) {
 plot_glm_coefs(glm_G, "Guards")
 plot_glm_coefs(glm_F, "Forwards")
 plot_glm_coefs(glm_C, "Centers")
+
+
