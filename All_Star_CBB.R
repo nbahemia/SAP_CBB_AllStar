@@ -1,3 +1,6 @@
+# All-Star College Basketball Player Project
+# Years covered, 2009 - 2021.
+
 library(dplyr)
 library(readxl)
 library(ggplot2)
@@ -91,3 +94,40 @@ cor_by_pos <- data.frame(
 )
 
 cor_by_pos
+
+mean_by_group <- CBBPlayers_labeled %>%
+  group_by(simple_pos, is_all_star) %>%
+  summarize(across(all_of(percentile_cols), mean, na.rm = TRUE))
+
+mean_by_group
+
+full_formula <- as.formula(
+  paste("is_all_star ~", paste(percentile_cols, collapse = " + "))
+)
+
+glm_G_full <- glm(
+  full_formula,
+  data = CBBPlayers_labeled %>% filter(simple_pos == "G"),
+  family = "binomial"
+)
+
+
+glm_F_full <- glm(
+  full_formula,
+  data = CBBPlayers_labeled %>% filter(simple_pos == "F"),
+  family = "binomial"
+)
+
+glm_C_full <- glm(
+  full_formula,
+  data = CBBPlayers_labeled %>% filter(simple_pos == "C"),
+  family = "binomial"
+)
+
+summary(glm_G_full)
+
+summary(glm_F_full)
+
+summary(glm_C_full)
+
+
