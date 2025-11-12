@@ -23,68 +23,69 @@ view(DraftedPlayers)
 # ============================================================
 # 2. All-Star Lookup Table (Name, School, College Years)
 # ============================================================
-allstars_lookup <- tribble(
-  ~player_name,              ~team,              ~start_year, ~end_year,
-  "Andrew Wiggins",          "Kansas",            2013,        2014,
-  "Anthony Davis",           "Kentucky",          2011,        2012,
-  "Anthony Edwards",         "Georgia",           2019,        2020,
-  "Edrice Adebayo",          "Kentucky",          2016,        2017,
-  "Ben Simmons",             "LSU",               2015,        2016,
-  "Bradley Beal",            "Florida",           2011,        2012,
-  "Brandon Ingram",          "Duke",              2015,        2016,
-  "Cade Cunningham",         "Oklahoma St.",      2020,        2021,
-  "D'Angelo Russell",        "Ohio St.",          2014,        2015,
-  "Damian Lillard",          "Weber St.",         2008,        2012,
-  "Darius Garland",          "Vanderbilt",        2018,        2019,
-  "Dejounte Murray",         "Washington",        2015,        2016,
-  "DeMarcus Cousins",        "Kentucky",          2009,        2010,
-  "Devin Booker",            "Kentucky",          2014,        2015,
-  "Domantas Sabonis",        "Gonzaga",           2014,        2016,
-  "Donovan Mitchell",        "Louisville",        2015,        2017,
-  "Draymond Green",          "Michigan St.",      2008,        2012,
-  "Evan Mobley",             "USC",               2020,        2021,
-  "Fred VanVleet",           "Wichita St.",       2012,        2016,
-  "Gordon Hayward",          "Butler",            2008,        2010,
-  "Isaiah Thomas",           "Washington",        2008,        2011,
-  "Ja Morant",               "Murray St.",        2017,        2019,
-  "Jalen Brunson",           "Villanova",         2015,        2018,
-  "Jalen Williams",          "Santa Clara",       2019,        2022,
-  "Jaren Jackson Jr.",       "Michigan St.",      2017,        2018,
-  "Jarrett Allen",           "Texas",             2016,        2017,
-  "Jaylen Brown",            "California",        2015,        2016,
-  "Jayson Tatum",            "Duke",              2016,        2017,
-  "Jimmy Butler",            "Marquette",         2008,        2011,
-  "John Wall",               "Kentucky",          2009,        2010,
-  "Julius Randle",           "Kentucky",          2013,        2014,
-  "Karl-Anthony Towns",      "Kentucky",          2014,        2015,
-  "Kawhi Leonard",           "San Diego St.",     2009,        2011,
-  "Kemba Walker",            "Connecticut",       2008,        2011,
-  "Khris Middleton",         "Texas A&M",         2009,        2012,
-  "Klay Thompson",           "Washington St.",    2008,        2011,
-  "Kyrie Irving",            "Duke",              2010,        2011,
-  "Lauri Markkanen",         "Arizona",           2016,        2017,
-  "Nikola Vucevic",          "USC",               2008,        2011,
-  "Pascal Siakam",           "New Mexico St.",    2014,        2016,
-  "Paul George",             "Fresno St.",        2008,        2010,
-  "Shai Gilgeous-Alexander", "Kentucky",          2017,        2018,
-  "Trae Young",              "Oklahoma",          2017,        2018,
-  "Tyler Herro",             "Kentucky",          2018,        2019,
-  "Tyrese Haliburton",       "Iowa St.",          2018,        2020,
-  "Tyrese Maxey",            "Kentucky",          2019,        2020,
-  "Victor Oladipo",          "Indiana",           2010,        2013,
-  "Zach LaVine",             "UCLA",              2013,        2014,
-  "Zion Williamson",         "Duke",              2018,        2019
+allstars_lookup_pid <- tribble(
+  ~player_name,               ~pid,
+  "Khris Middleton",         12631,
+  "Draymond Green",           8827,
+  "Jalen Brunson",           40885,
+  "Dejounte Murray",         40260,
+  "Pascal Siakam",           37123,
+  "Jarrett Allen",           47193,
+  "Tyrese Maxey",            71900,
+  "Nikola Vucevic",           5408,
+  "Kawhi Leonard",           13395,
+  "Edrice Adebayo",          47569,
+  "Donovan Mitchell",        41754,
+  "Zach LaVine",             31114,
+  "Tyler Herro",             66474,
+  "Devin Booker",            52495,
+  "Tyrese Haliburton",       65663,
+  "Klay Thompson",            8716,
+  "Shai Gilgeous-Alexander", 51731,
+  "Domantas Sabonis",        33822,
+  "Paul George",              5903,
+  "Kemba Walker",             9075,
+  "Gordon Hayward",           6696,
+  "Lauri Markkanen",         44973,
+  "Julius Randle",           29051,
+  "Damian Lillard",           4509,
+  "Trae Young",              51469,
+  "Darius Garland",          65919,
+  "DeMarcus Cousins",        13656,
+  "Jaren Jackson Jr.",       51788,
+  "Evan Mobley",             72870,
+  "Bradley Beal",            22042,
+  "Jaylen Brown",            38792,
+  "Jayson Tatum",            45563,
+  "Victor Oladipo",          18513,
+  "D'Angelo Russell",        38468,
+  "Brandon Ingram",          40152,
+  "Kyrie Irving",            18579,
+  "John Wall",               12637,
+  "Anthony Edwards",         71877,
+  "Zion Williamson",         65847,
+  "Andrew Wiggins",          31626,
+  "Cade Cunningham",         72372,
+  "Anthony Davis",           22364,
+  "Ben Simmons",             41356,
+  "Karl-Anthony Towns",      35836,
+  "Fred VanVleet",           26143,
+  "Jalen Williams",          70269,
+  "Isaiah Thomas",            8712,
+  "Jimmy Butler",             9284,
+  "Ja Morant",               50678
 )
 
 # ============================================================
 # 3. Join lookup BEFORE selecting most recent season
 # ============================================================
+allstars_lookup_pid <- allstars_lookup_pid %>%
+  rename(pid_lookup = pid, player_name_lookup = player_name)
+
 CBBPlayers_labeled <- CBBPlayers %>%
-  left_join(allstars_lookup, by = c("player_name", "team")) %>%
-  mutate(
-    is_all_star = ifelse(!is.na(start_year) & year >= start_year & year <= end_year, 1, 0)
-  ) %>%
-  select(-start_year, -end_year)
+  left_join(allstars_lookup_pid, by = c("pid" = "pid_lookup")) %>%
+  mutate(is_all_star = ifelse(!is.na(player_name_lookup), 1, 0))
+
 
 # ============================================================
 # 4. Select most recent year per player
@@ -141,3 +142,8 @@ plot_glm_coefs(glm_F, "Forwards")
 plot_glm_coefs(glm_C, "Centers")
 
 
+#allstars_found_with_pos <- CBBPlayers_labeled %>%
+ # filter(is_all_star == 1) %>%
+ # distinct(player_name, pid, simple_pos)  # include positions
+
+# print(allstars_found_with_pos, n = Inf)
