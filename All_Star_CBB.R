@@ -1,166 +1,186 @@
-# All-Star College Basketball Player Project
-# Years covered, 2009 - 2021.
-
-library(readxl)
+# ============================================================
+# Libraries
+# ============================================================
 library(dplyr)
-library(writexl)
+library(readxl)
+library(ggplot2)
 library(knitr)
 
-# --- 0. Load Data ---
+# ============================================================
+# 1. Load datasets
+# ============================================================
 CBBPlayers <- read_excel("/Users/varunrao/Downloads/CBBPlayers_with_Positions (1).xlsx")
 DraftedPlayers <- read_excel("/Users/varunrao/Downloads/DraftedPlayers2009-2021.xlsx")
 
-# --- 1. Height and Position Cleaning ---
-CBBPlayers <- CBBPlayers %>%
-  mutate(
-    # Handle missing or malformed heights safely
-    ht_clean = ifelse(grepl("^[0-9]+'[0-9]+", ht), ht, NA_character_),
-    
-    # Extract feet and inches from the "6'8"" style format
-    feet = as.numeric(sub("'[0-9]+.*", "", ht_clean)),
-    inches = as.numeric(sub(".*'(\\d+).*", "\\1", ht_clean)),
-    
-    # Create a nicely formatted height string
-    ht = paste0(feet, "'", inches, "\""),
-    
-    # Calculate total height in inches
-    height_in = feet * 12 + inches
-  ) %>%
-  select(-ht_clean)
-
-CBBPlayers <- CBBPlayers %>%
-  mutate(
-    simple_pos = case_when(
-      grepl("pg|guard|combo g|wing g", pos, ignore.case = TRUE) ~ "G",
-      grepl("stretch 4|wing f", pos, ignore.case = TRUE) ~ "F",
-      grepl("pf/c", pos, ignore.case = TRUE) & height_in >= 82 ~ "C",
-      grepl("pf/c", pos, ignore.case = TRUE) & height_in < 82 ~ "F",
-      grepl("c|center", pos, ignore.case = TRUE) ~ "C",
-      TRUE ~ "F"
-    )
-  )
-
-# --- 2. Calculate Position-Specific Percentiles ---
-CBBPlayers <- CBBPlayers %>%
-  group_by(simple_pos) %>%
-  mutate(
-    Ortg_percentile    = percent_rank(Ortg) * 100,
-    usg_percentile     = percent_rank(usg) * 100,
-    eFG_percentile     = percent_rank(eFG) * 100,
-    TS_per_percentile  = percent_rank(TS_per) * 100,
-    ORB_per_percentile = percent_rank(ORB_per) * 100,
-    DRB_per_percentile = percent_rank(DRB_per) * 100,
-    AST_per_percentile = percent_rank(AST_per) * 100,
-    TO_per_percentile  = percent_rank(TO_per) * 100,
-    blk_per_percentile = percent_rank(blk_per) * 100,
-    stl_per_percentile = percent_rank(stl_per) * 100,
-    porpag_percentile  = percent_rank(porpag) * 100,
-    adjoe_percentile   = percent_rank(adjoe) * 100,
-    ast_tov_percentile = percent_rank(`ast/tov`) * 100,
-    drtg_percentile    = percent_rank(drtg) * 100,
-    adrtg_percentile   = percent_rank(adrtg) * 100,
-    dporpag_percentile = percent_rank(dporpag) * 100
-  ) %>%
-  ungroup()
-
-
-# --- 3. Filter to Final Season, Add All-Star Grouping, and Filter Minutes ---
-
-players_of_interest <- c(
-  "Anthony Davis", "Edrice Adebayo", "Bradley Beal", "Damian Lillard", 
-  "DeMarcus Cousins", "Devin Booker", "Donovan Mitchell", "Draymond Green", 
-  "Gordon Hayward", "Isaiah Thomas", "Jayson Tatum", "Jaylen Brown", 
-  "Jimmy Butler", "John Wall", "Julius Randle", "Karl-Anthony Towns", 
-  "Kawhi Leonard", "Kemba Walker", "Khris Middleton", "Klay Thompson", 
-  "Kyrie Irving", "Nikola Vucevic", "Paul George", "Trae Young", 
-  "Victor Oladipo", "Zach LaVine", "Zion Williamson", "Ben Simmons", 
-  "Brandon Ingram", "Pascal Siakam", "D'Angelo Russell", "Domantas Sabonis", 
-  "Ja Morant", "Dejounte Murray", "Jarrett Allen", "Andrew Wiggins", 
-  "Shai Gilgeous-Alexander", "Jalen Williams", "Evan Mobley", 
-  "Jaren Jackson Jr.", "Jalen Brunson", "Cade Cunningham", "Tyler Herro", 
-  "Darius Garland", "Anthony Edwards", "Tyrese Maxey", "Tyrese Haliburton", 
-  "Fred VanVleet", "Lauri Markkanen"
+# ============================================================
+# 2. All-Star lookup table (accurate name + school matching)
+# ============================================================
+allstars_lookup <- tribble(
+  ~player_name,              ~team,              ~start_year, ~end_year,
+  "Andrew Wiggins",          "Kansas",            2013, 2014,
+  "Anthony Davis",           "Kentucky",          2011, 2012,
+  "Anthony Edwards",         "Georgia",           2019, 2020,
+  "Edrice Adebayo",          "Kentucky",          2016, 2017,
+  "Ben Simmons",             "LSU",               2015, 2016,
+  "Bradley Beal",            "Florida",           2011, 2012,
+  "Brandon Ingram",          "Duke",              2015, 2016,
+  "Cade Cunningham",         "Oklahoma St.",      2020, 2021,
+  "D'Angelo Russell",        "Ohio St.",          2014, 2015,
+  "Damian Lillard",          "Weber St.",         2008, 2012,
+  "Darius Garland",          "Vanderbilt",        2018, 2019,
+  "Dejounte Murray",         "Washington",        2015, 2016,
+  "DeMarcus Cousins",        "Kentucky",          2009, 2010,
+  "Devin Booker",            "Kentucky",          2014, 2015,
+  "Domantas Sabonis",        "Gonzaga",           2014, 2016,
+  "Donovan Mitchell",        "Louisville",        2015, 2017,
+  "Draymond Green",          "Michigan St.",      2008, 2012,
+  "Evan Mobley",             "USC",               2020, 2021,
+  "Fred VanVleet",           "Wichita St.",       2012, 2016,
+  "Gordon Hayward",          "Butler",            2008, 2010,
+  "Isaiah Thomas",           "Washington",        2008, 2011,
+  "Ja Morant",               "Murray St.",        2017, 2019,
+  "Jalen Brunson",           "Villanova",         2015, 2018,
+  "Jalen Williams",          "Santa Clara",       2019, 2022,
+  "Jaren Jackson Jr.",       "Michigan St.",      2017, 2018,
+  "Jarrett Allen",           "Texas",             2016, 2017,
+  "Jaylen Brown",            "California",        2015, 2016,
+  "Jayson Tatum",            "Duke",              2016, 2017,
+  "Jimmy Butler",            "Marquette",         2008, 2011,
+  "John Wall",               "Kentucky",          2009, 2010,
+  "Julius Randle",           "Kentucky",          2013, 2014,
+  "Karl-Anthony Towns",      "Kentucky",          2014, 2015,
+  "Kawhi Leonard",           "San Diego St.",     2009, 2011,
+  "Kemba Walker",            "Connecticut",       2008, 2011,
+  "Khris Middleton",         "Texas A&M",         2009, 2012,
+  "Klay Thompson",           "Washington St.",    2008, 2011,
+  "Kyrie Irving",            "Duke",              2010, 2011,
+  "Lauri Markkanen",         "Arizona",           2016, 2017,
+  "Nikola Vucevic",          "USC",               2008, 2011,
+  "Pascal Siakam",           "New Mexico St.",    2014, 2016,
+  "Paul George",             "Fresno St.",        2008, 2010,
+  "Shai Gilgeous-Alexander", "Kentucky",          2017, 2018,
+  "Trae Young",              "Oklahoma",          2017, 2018,
+  "Tyler Herro",             "Kentucky",          2018, 2019,
+  "Tyrese Haliburton",       "Iowa St.",          2018, 2020,
+  "Tyrese Maxey",            "Kentucky",          2019, 2020,
+  "Victor Oladipo",          "Indiana",           2010, 2013,
+  "Zach LaVine",             "UCLA",              2013, 2014,
+  "Zion Williamson",         "Duke",              2018, 2019
 )
 
-CBBPlayers_filtered <- CBBPlayers %>%
-  group_by(simple_pos) %>%
+# ============================================================
+# 3. Merge and label All-Stars correctly
+# ============================================================
+CBBPlayers_labeled <- CBBPlayers %>%
+  left_join(allstars_lookup, by = c("player_name", "team")) %>%
+  mutate(is_all_star = ifelse(!is.na(start_year) & year >= start_year & year <= end_year, 1, 0)) %>%
+  select(-start_year, -end_year)
+
+# ============================================================
+# 4. Select most recent college season per player
+# ============================================================
+CBBPlayers_Recent <- CBBPlayers_labeled %>%
+  group_by(player_name) %>%
   filter(year == max(year, na.rm = TRUE)) %>%
   ungroup() %>%
-  mutate(is_interest = ifelse(player_name %in% players_of_interest, "Interest", "Other")) %>%
+  mutate(simple_pos = toupper(trimws(simple_pos))) %>%
   filter(simple_pos %in% c("G", "F", "C"))
 
+# ============================================================
+# 5. Split into position datasets
+# ============================================================
+guards <- CBBPlayers_Recent %>% filter(simple_pos == "G")
+forwards <- CBBPlayers_Recent %>% filter(simple_pos == "F")
+centers <- CBBPlayers_Recent %>% filter(simple_pos == "C")
 
+# ============================================================
+# 6. T-tests: All-Stars vs. non–All-Stars, filtering by minutes
+# ============================================================
+min_minutes_threshold <- 20   # threshold for % of team minutes played
 
-# Keep your original stats_to_test
 stats_to_test <- c(
-  "Ortg_percentile", "usg_percentile", "eFG_percentile", "TS_per_percentile",
-  "ORB_per_percentile", "DRB_per_percentile", "AST_per_percentile",
-  "TO_per_percentile", "blk_per_percentile", "stl_per_percentile",
-  "porpag_percentile", "adjoe_percentile", "ast_tov_percentile",
-  "drtg_percentile", "adrtg_percentile", "dporpag_percentile"
+  "Ortg", "usg", "eFG", "TS_per", "ORB_per", "DRB_per",
+  "AST_per", "TO_per", "blk_per", "stl_per", "porpag",
+  "adjoe", "ast/tov", "drtg", "adrtg", "dporpag"
 )
 
-t_test_by_pos <- data.frame(
-  position = character(),
-  stat = character(),
-  interest_mean = numeric(),
-  other_mean = numeric(),
-  t_statistic = numeric(),
-  p_value = numeric()
-)
-
-# --- 4. T-Test Loop by Position ---
-for (pos in c("G", "F", "C")) {
-  data_pos <- CBBPlayers_filtered %>%
-    filter(simple_pos == pos)
-  
-  interest_count <- sum(data_pos$is_interest == "Interest", na.rm = TRUE)
-  other_count <- sum(data_pos$is_interest == "Other", na.rm = TRUE)
-  
-  if (interest_count < 2 || other_count < 2) {
-    cat(paste("\nSkipping Position:", pos, "- Not enough players in both groups (Interest:", interest_count, ", Other:", other_count, ").\n"))
-    next
-  }
-  
-  cat("\n--- Position:", pos, "---\n")
-  cat("Interest players:", interest_count, "| Other players:", other_count, "\n")
+run_ttests <- function(df, pos_name, min_minutes) {
+  results <- data.frame()
   
   for (stat in stats_to_test) {
-    data_sub <- data_pos %>%
-      filter(!is.na(.data[[stat]]))
-    
-    # Extract numeric vectors for the two groups
-    interest_vals <- data_sub[[stat]][data_sub$is_interest == "Interest"]
-    other_vals <- data_sub[[stat]][data_sub$is_interest == "Other"]
-    
-    # Skip if one group is empty
-    if (length(interest_vals) < 2 || length(other_vals) < 2) next
-    
-    # Run two-sample t-test properly
-    t_res <- t.test(x = interest_vals, y = other_vals, var.equal = FALSE)
-    
-    # Append results
-    t_test_by_pos <- rbind(
-      t_test_by_pos,
-      data.frame(
-        position = pos,
-        stat = stat,
-        interest_mean = mean(interest_vals, na.rm = TRUE),
-        other_mean = mean(other_vals, na.rm = TRUE),
-        t_statistic = t_res$statistic,
-        p_value = t_res$p.value
+    if (stat %in% names(df)) {
+      sub <- df %>%
+        filter(!is.na(.data[[stat]])) %>%
+        # Only include All-Stars OR players who played >= 20% of team minutes
+        filter(is_all_star == 1 | Min_per >= min_minutes)
+      
+      # Skip if there aren’t both groups
+      if (length(unique(sub$is_all_star)) < 2) next
+      
+      t_res <- t.test(sub[[stat]] ~ sub$is_all_star, var.equal = FALSE)
+      
+      results <- rbind(
+        results,
+        data.frame(
+          position = pos_name,
+          stat = stat,
+          all_star_mean = mean(sub[[stat]][sub$is_all_star == 1], na.rm = TRUE),
+          others_mean = mean(sub[[stat]][sub$is_all_star == 0], na.rm = TRUE),
+          t_value = round(t_res$statistic, 2),
+          p_value = round(t_res$p.value, 4),
+          significant = ifelse(t_res$p.value < 0.05, "✅ Yes", "❌ No")
+        )
       )
-    )
+    }
   }
+  return(results)
 }
 
-# --- 5. Format and Display Results ---
-t_test_table <- t_test_by_pos %>%
-  arrange(position, p_value) %>%
+# ============================================================
+# 7. Run t-tests by position
+# ============================================================
+t_G <- run_ttests(guards, "G", min_minutes_threshold)
+t_F <- run_ttests(forwards, "F", min_minutes_threshold)
+t_C <- run_ttests(centers, "C", min_minutes_threshold)
+
+t_test_table <- bind_rows(t_G, t_F, t_C) %>%
+  arrange(position, p_value)
+
+# ============================================================
+# 8. Display results
+# ============================================================
+kable(
+  t_test_table,
+  caption = paste("Two-sample t-tests (Min_per ≥", min_minutes_threshold, "%): All-Stars vs. Others per position")
+)
+t_test_heatmap <- t_test_table %>%
   mutate(
-    across(where(is.numeric), round, 2),
-    significant = ifelse(p_value < 0.05, "✅ Yes", "❌ No")
+    pct_diff = ((all_star_mean - others_mean) / others_mean) * 100,
+    sig_marker = ifelse(p_value < 0.05, "*", "")
   )
 
-# THIS IS THE FINAL OUTPUT COMMAND
-kable(t_test_table, caption = "Two-sample t-test: All-Stars vs. Others, by Position (Min_per > 200)")
+ggplot(t_test_heatmap, 
+       aes(x = position, y = reorder(stat, pct_diff), fill = pct_diff)) +
+  geom_tile(color = "white", linewidth = 1) +
+  geom_text(aes(label = sig_marker), size = 8, vjust = 0.7, color = "black") +
+  scale_fill_gradientn(
+    colors = c("#2166AC", "#4393C3", "#92C5DE", "#D1E5F0", 
+               "#FDDBC7", "#F4A582", "#D6604D", "#B2182B"),
+    values = scales::rescale(c(min(t_test_heatmap$pct_diff, na.rm = TRUE), 
+                               -50, -10, 0, 10, 50, 100, 
+                               max(t_test_heatmap$pct_diff, na.rm = TRUE))),
+    name = "% Difference\n(All-Stars\nvs Others)"
+  ) +
+  labs(
+    title = "All-Star Statistical Profile by Position",
+    subtitle = paste("Percent difference from high-minutes players (Min% ≥", 
+                     min_minutes_threshold, "%). * = p < 0.05"),
+    x = "Position",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.x = element_text(size = 11),
+    panel.grid = element_blank()
+  )
