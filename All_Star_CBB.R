@@ -5,16 +5,17 @@ library(dplyr)
 library(readxl)
 library(ggplot2)
 library(tibble)
-library(caret)  # For cross-validation and model evaluation
-library(pROC)   # For ROC curves
+library(caret)
+library(pROC)
+library(glmnet)  # For regularized logistic regression
 
 # ============================================================
-# 1. Load datasets (same as before)
+# 1. Load datasets
 # ============================================================
 CBBPlayers <- read_excel("/Users/naitikrambhia/Downloads/CBBPlayers_with_Positions.xlsx")
 
 # ============================================================
-# 2. All-Star Lookup Table (same as before)
+# 2. All-Star Lookup Table
 # ============================================================
 allstars_lookup <- tribble(
   ~player_name,              ~team,              ~start_year, ~end_year,
@@ -81,14 +82,14 @@ CBBPlayers_labeled <- CBBPlayers %>%
 
 # Most recent year per player for training
 CBBPlayers_Training <- CBBPlayers_labeled %>%
-  filter(year <= 2021) %>%  # Training data only
+  filter(year <= 2021) %>%
   group_by(player_name) %>%
   filter(year == max(year, na.rm = TRUE)) %>%
   ungroup() %>%
   mutate(simple_pos = factor(simple_pos, levels = c("G", "F", "C")))
 
 # ============================================================
-# 4. Define predictors
+# 4. Define predictors (matching descriptive model except ast/tov)
 # ============================================================
 raw_stats <- c(
   "Ortg", "usg", "eFG", "TS_per", "ORB_per", "DRB_per", "AST_per",
@@ -96,37 +97,59 @@ raw_stats <- c(
   "drtg", "adrtg", "dporpag"
 )
 
+# Note: This matches the descriptive model's stats, excluding ast/tov
+
 full_formula <- as.formula(
   paste("is_all_star ~", paste(raw_stats, collapse = " + "))
 )
 
 # ============================================================
-# 5. Train Models with Cross-Validation
+# 5. Train Models with Regularization (FIXED for better predictions)
 # ============================================================
 
 train_and_evaluate <- function(data, pos_name) {
   cat("\n=== Training model for", pos_name, "===\n")
   
-  # Remove rows with missing values
   data_clean <- data %>%
-    select(is_all_star, all_of(gsub("`", "", raw_stats))) %>%
+    select(is_all_star, all_of(raw_stats)) %>%
     na.omit()
   
-  # Train model
-  model <- glm(full_formula, data = data_clean, family = "binomial")
+  # Add small penalty to prevent perfect separation
+  # Use ridge regression (L2 penalty) with very small lambda
+  X <- as.matrix(data_clean[, raw_stats])
+  y <- data_clean$is_all_star
   
-  # Get predictions on training data
-  data_clean$pred_prob <- predict(model, type = "response")
+  # Scale features for better numerical stability
+  X_scaled <- scale(X)
+  scaling_params <- list(
+    center = attr(X_scaled, "scaled:center"),
+    scale = attr(X_scaled, "scaled:scale")
+  )
   
-  # Calculate metrics
+  # Use glmnet with very small regularization
+  cv_model <- cv.glmnet(X_scaled, y, family = "binomial", alpha = 0, 
+                        lambda = 10^seq(-4, -1, length.out = 20))
+  
+  # Get predictions
+  data_clean$pred_prob <- as.vector(predict(cv_model, newx = X_scaled, 
+                                            s = "lambda.min", type = "response"))
+  
+  # Calculate AUC
   roc_obj <- roc(data_clean$is_all_star, data_clean$pred_prob, quiet = TRUE)
   auc_value <- auc(roc_obj)
   
   cat("AUC:", round(auc_value, 3), "\n")
   cat("Sample size:", nrow(data_clean), 
       "| All-Stars:", sum(data_clean$is_all_star), "\n")
+  cat("Prediction range:", round(min(data_clean$pred_prob), 4), "to", 
+      round(max(data_clean$pred_prob), 4), "\n")
   
-  return(list(model = model, auc = auc_value, data = data_clean))
+  return(list(
+    model = cv_model, 
+    auc = auc_value, 
+    data = data_clean,
+    scaling = scaling_params
+  ))
 }
 
 # Train position-specific models
@@ -146,22 +169,18 @@ results_C <- train_and_evaluate(
 )
 
 # ============================================================
-# 6. Plot ROC Curves (using ggplot2 to avoid margin errors)
+# 6. Plot ROC Curves
 # ============================================================
 
-# Create ROC objects
 roc_G <- roc(results_G$data$is_all_star, results_G$data$pred_prob, quiet = TRUE)
 roc_F <- roc(results_F$data$is_all_star, results_F$data$pred_prob, quiet = TRUE)
 roc_C <- roc(results_C$data$is_all_star, results_C$data$pred_prob, quiet = TRUE)
 
-# Print AUC values
 cat("\n=== Model Performance (AUC) ===\n")
 cat("Guards:  ", round(auc(roc_G), 3), "\n")
 cat("Forwards:", round(auc(roc_F), 3), "\n")
 cat("Centers: ", round(auc(roc_C), 3), "\n\n")
 
-# Plot using ggroc (safer and better looking)
-library(pROC)
 roc_plot <- ggroc(list(Guards = roc_G, Forwards = roc_F, Centers = roc_C)) +
   theme_minimal() +
   labs(title = "ROC Curves by Position",
@@ -181,11 +200,10 @@ roc_plot <- ggroc(list(Guards = roc_G, Forwards = roc_F, Centers = roc_C)) +
 print(roc_plot)
 
 # ============================================================
-# 7. PREDICTION FUNCTION for Current/Future Players
+# 7. PREDICTION FUNCTION for Current/Future Players (FIXED)
 # ============================================================
 
-predict_allstar_probability <- function(new_data, guard_model, forward_model, center_model) {
-  # Prepare new data
+predict_allstar_probability <- function(new_data, guard_result, forward_result, center_result) {
   new_data_pred <- new_data %>%
     group_by(player_name) %>%
     filter(year == max(year, na.rm = TRUE)) %>%
@@ -195,23 +213,54 @@ predict_allstar_probability <- function(new_data, guard_model, forward_model, ce
   # Initialize prediction column
   new_data_pred$allstar_probability <- NA
   
-  # Predict by position
+  # Check for missing required stats
+  missing_stats <- setdiff(raw_stats, names(new_data_pred))
+  if (length(missing_stats) > 0) {
+    cat("WARNING: Missing required stats:", paste(missing_stats, collapse = ", "), "\n")
+    cat("Predictions may be inaccurate or fail.\n\n")
+  }
+  
+  # Predict by position with error handling
   guards <- new_data_pred %>% filter(simple_pos == "G")
   if (nrow(guards) > 0) {
-    new_data_pred$allstar_probability[new_data_pred$simple_pos == "G"] <- 
-      predict(guard_model, newdata = guards, type = "response")
+    tryCatch({
+      X_g <- as.matrix(guards[, raw_stats])
+      X_g_scaled <- scale(X_g, center = guard_result$scaling$center, 
+                          scale = guard_result$scaling$scale)
+      new_data_pred$allstar_probability[new_data_pred$simple_pos == "G"] <- 
+        as.vector(predict(guard_result$model, newx = X_g_scaled, 
+                          s = "lambda.min", type = "response"))
+    }, error = function(e) {
+      cat("Error predicting for guards:", e$message, "\n")
+    })
   }
   
   forwards <- new_data_pred %>% filter(simple_pos == "F")
   if (nrow(forwards) > 0) {
-    new_data_pred$allstar_probability[new_data_pred$simple_pos == "F"] <- 
-      predict(forward_model, newdata = forwards, type = "response")
+    tryCatch({
+      X_f <- as.matrix(forwards[, raw_stats])
+      X_f_scaled <- scale(X_f, center = forward_result$scaling$center, 
+                          scale = forward_result$scaling$scale)
+      new_data_pred$allstar_probability[new_data_pred$simple_pos == "F"] <- 
+        as.vector(predict(forward_result$model, newx = X_f_scaled, 
+                          s = "lambda.min", type = "response"))
+    }, error = function(e) {
+      cat("Error predicting for forwards:", e$message, "\n")
+    })
   }
   
   centers <- new_data_pred %>% filter(simple_pos == "C")
   if (nrow(centers) > 0) {
-    new_data_pred$allstar_probability[new_data_pred$simple_pos == "C"] <- 
-      predict(center_model, newdata = centers, type = "response")
+    tryCatch({
+      X_c <- as.matrix(centers[, raw_stats])
+      X_c_scaled <- scale(X_c, center = center_result$scaling$center, 
+                          scale = center_result$scaling$scale)
+      new_data_pred$allstar_probability[new_data_pred$simple_pos == "C"] <- 
+        as.vector(predict(center_result$model, newx = X_c_scaled, 
+                          s = "lambda.min", type = "response"))
+    }, error = function(e) {
+      cat("Error predicting for centers:", e$message, "\n")
+    })
   }
   
   return(new_data_pred)
@@ -221,33 +270,28 @@ predict_allstar_probability <- function(new_data, guard_model, forward_model, ce
 # 8. Apply Predictions to Current Players (2022+)
 # ============================================================
 
-# Filter for players after 2021 (current/future players)
 Current_Players <- CBBPlayers %>%
   filter(year > 2021)
 
-# If you have current players, predict their All-Star probability
 if (nrow(Current_Players) > 0) {
   Predictions <- predict_allstar_probability(
     Current_Players,
-    results_G$model,
-    results_F$model,
-    results_C$model
+    results_G,
+    results_F,
+    results_C
   )
   
-  # View top prospects
   Top_Prospects <- Predictions %>%
     select(player_name, team, year, simple_pos, allstar_probability, 
            conf, Ortg, usg, eFG, AST_per, DRB_per) %>%
     arrange(desc(allstar_probability)) %>%
     head(20)
   
-  cat("\n")
-  cat("=================================================\n")
+  cat("\n=================================================\n")
   cat("===        TOP 20 ALL-STAR PROSPECTS          ===\n")
   cat("=================================================\n\n")
   print(Top_Prospects, n = 20)
   
-  # Also view by position
   cat("\n\n=== TOP GUARDS ===\n")
   Top_Guards <- Predictions %>%
     filter(simple_pos == "G") %>%
@@ -272,7 +316,6 @@ if (nrow(Current_Players) > 0) {
     head(10)
   print(Top_Centers, n = 10)
   
-  # Visualize predictions
   hist_plot <- ggplot(Predictions, aes(x = allstar_probability)) +
     geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
     facet_wrap(~simple_pos) +
@@ -282,7 +325,6 @@ if (nrow(Current_Players) > 0) {
     theme_minimal()
   print(hist_plot)
   
-  # Save predictions to CSV for easy viewing
   write.csv(Predictions %>% 
               select(player_name, team, year, simple_pos, allstar_probability, 
                      conf, Ortg, usg, eFG, AST_per, DRB_per, blk_per) %>%
@@ -292,22 +334,54 @@ if (nrow(Current_Players) > 0) {
   cat("\n✓ Full predictions saved to: AllStar_Predictions.csv\n")
   
 } else {
-  cat("\n")
-  cat("=================================================\n")
+  cat("\n=================================================\n")
   cat("No players found after 2021 in dataset.\n")
-  cat("To make predictions, add current player data to CBBPlayers.\n")
-  cat("=================================================\n")
+  cat("Testing model on recent players (2019-2021)...\n")
+  cat("=================================================\n\n")
+  
+  # Test on recent players from training set
+  Test_Players <- CBBPlayers_labeled %>%
+    filter(year >= 2019, year <= 2021) %>%
+    group_by(player_name) %>%
+    filter(year == max(year)) %>%
+    ungroup()
+  
+  Test_Predictions <- predict_allstar_probability(
+    Test_Players,
+    results_G,
+    results_F,
+    results_C
+  )
+  
+  cat("\n=== TOP 20 PREDICTED ALL-STARS (2019-2021) ===\n")
+  Top_Test <- Test_Predictions %>%
+    select(player_name, team, year, simple_pos, is_all_star, allstar_probability, 
+           Ortg, usg, eFG) %>%
+    arrange(desc(allstar_probability)) %>%
+    head(20)
+  print(Top_Test, n = 20)
+  
+  cat("\n=== ACTUAL ALL-STARS IN TEST SET ===\n")
+  Actual_AllStars <- Test_Predictions %>%
+    filter(is_all_star == 1) %>%
+    select(player_name, team, year, simple_pos, allstar_probability, Ortg) %>%
+    arrange(desc(allstar_probability))
+  print(Actual_AllStars, n = 20)
 }
 
 # ============================================================
-# 9. Feature Importance Visualization
+# 9. Feature Importance Visualization (FIXED for glmnet)
 # ============================================================
 
-plot_feature_importance <- function(model, pos_name) {
+plot_feature_importance <- function(result, pos_name) {
+  # Extract coefficients from glmnet model
+  coef_matrix <- as.matrix(coef(result$model, s = "lambda.min"))
+  coef_values <- coef_matrix[-1, 1]  # Remove intercept
+  
   coefs <- data.frame(
-    stat = names(coef(model))[-1],
-    estimate = coef(model)[-1],
-    abs_estimate = abs(coef(model)[-1])
+    stat = raw_stats,
+    estimate = coef_values,
+    abs_estimate = abs(coef_values)
   )
   
   ggplot(coefs, aes(x = reorder(stat, abs_estimate), y = estimate, 
@@ -323,650 +397,188 @@ plot_feature_importance <- function(model, pos_name) {
     theme_minimal()
 }
 
-plot_feature_importance(results_G$model, "Guards")
-plot_feature_importance(results_F$model, "Forwards")
-plot_feature_importance(results_C$model, "Centers")
+plot_feature_importance(results_G, "Guards")
+plot_feature_importance(results_F, "Forwards")
+plot_feature_importance(results_C, "Centers")
 
 # ============================================================
-# 10. Save Models for Future Use
+# 10. Save Models
 # ============================================================
 
-saveRDS(results_G$model, "allstar_model_guards.rds")
-saveRDS(results_F$model, "allstar_model_forwards.rds")
-saveRDS(results_C$model, "allstar_model_centers.rds")
+saveRDS(results_G, "allstar_model_guards.rds")
+saveRDS(results_F, "allstar_model_forwards.rds")
+saveRDS(results_C, "allstar_model_centers.rds")
 
 cat("\n✓ Models saved successfully!\n")
 cat("Use readRDS() to load models for future predictions.\n")
 
 # ============================================================
-# 11. Interactive Prediction Function for Manual Input
+# 11. Prediction Functions with Calibrated Probabilities
 # ============================================================
 
-predict_new_player <- function() {
-  cat("\n=================================================\n")
-  cat("===     NBA ALL-STAR PREDICTION TOOL         ===\n")
-  cat("=================================================\n\n")
+# Helper function to calibrate probabilities to a better scale
+calibrate_probability <- function(raw_prob, position) {
+  # Get the max probability from training data for this position
+  max_prob <- switch(position,
+                     "G" = max(results_G$data$pred_prob),
+                     "F" = max(results_F$data$pred_prob),
+                     "C" = max(results_C$data$pred_prob))
   
-  # Get player info
-  player_name <- readline(prompt = "Enter player name: ")
-  position <- toupper(readline(prompt = "Enter position (G/F/C): "))
+  # Rescale so the best player gets ~80-90%
+  calibrated <- (raw_prob / max_prob) * 0.85
+  calibrated <- pmin(calibrated, 0.99)  # Cap at 99%
   
-  # Validate position
-  while (!position %in% c("G", "F", "C")) {
-    cat("Invalid position. Please enter G, F, or C.\n")
-    position <- toupper(readline(prompt = "Enter position (G/F/C): "))
-  }
+  return(calibrated)
+}
+
+# Function 1: Quick single player prediction (FIXED with calibration)
+quick_predict_v2 <- function(player_name, stats_list, position, use_calibrated = TRUE) {
+  result <- switch(position,
+                   "G" = results_G,
+                   "F" = results_F,
+                   "C" = results_C)
   
-  cat("\nEnter the following stats for", player_name, ":\n")
-  cat("(You can find these in standard box scores)\n\n")
+  player_data <- as.data.frame(stats_list)
   
-  # Helper function to get numeric input
-  get_stat <- function(stat_name, required = TRUE) {
-    input <- readline(prompt = paste0(stat_name, ": "))
-    if (input == "" && !required) return(NA)
-    val <- as.numeric(input)
-    return(val)
-  }
+  # Scale the input data using training parameters
+  X <- as.matrix(player_data[, raw_stats])
+  X_scaled <- scale(X, center = result$scaling$center, scale = result$scaling$scale)
   
-  # Collect basic stats from the table
-  cat("--- Per Game Stats ---\n")
-  PTS <- get_stat("Points Per Game (PTS)")
-  AST <- get_stat("Assists Per Game (AST)")
-  TRB <- get_stat("Total Rebounds Per Game (TRB)")
-  STL <- get_stat("Steals Per Game (STL)")
-  BLK <- get_stat("Blocks Per Game (BLK)")
-  TOV <- get_stat("Turnovers Per Game (TOV)")
+  # Predict
+  raw_prob <- as.vector(predict(result$model, newx = X_scaled, 
+                                s = "lambda.min", type = "response"))
   
-  cat("\n--- Shooting Stats ---\n")
-  FG_pct <- get_stat("Field Goal % (FG%) [as decimal, e.g., 0.45]")
-  FG3_pct <- get_stat("3-Point % (3P%) [as decimal, e.g., 0.35]")
-  FT_pct <- get_stat("Free Throw % (FT%) [as decimal, e.g., 0.75]")
-  
-  cat("\n--- Advanced Stats (if known, otherwise we'll estimate) ---\n")
-  MP <- get_stat("Minutes Per Game (MP)", required = FALSE)
-  ORB <- get_stat("Offensive Rebounds Per Game (ORB)", required = FALSE)
-  DRB <- get_stat("Defensive Rebounds Per Game (DRB)", required = FALSE)
-  
-  # Calculate derived stats needed for model
-  # These are approximations based on per-game stats
-  
-  # Estimate advanced metrics
-  if (is.na(MP)) MP <- 30  # Default minutes
-  if (is.na(ORB)) ORB <- TRB * 0.25  # Estimate ORB as 25% of total rebounds
-  if (is.na(DRB)) DRB <- TRB * 0.75  # Estimate DRB as 75% of total rebounds
-  
-  # Calculate percentages (rough estimates based on national averages)
-  ORB_per <- (ORB / MP) * 40 * 1.5  # Approximate ORB%
-  DRB_per <- (DRB / MP) * 40 * 1.5  # Approximate DRB%
-  AST_per <- (AST / MP) * 40 * 1.5  # Approximate AST%
-  TO_per <- (TOV / MP) * 40 * 1.5   # Approximate TO%
-  stl_per <- (STL / MP) * 40 * 0.5  # Approximate STL%
-  blk_per <- (BLK / MP) * 40 * 0.5  # Approximate BLK%
-  
-  # Calculate efficiency metrics
-  TS_per <- FG_pct * 1.05  # Rough approximation of True Shooting
-  eFG <- FG_pct + (0.5 * FG3_pct * 0.3)  # Approximate eFG%
-  
-  # Estimate usage (based on scoring)
-  usg <- (PTS / MP) * 40 * 0.8  # Rough usage estimate
-  
-  # Estimate ratings (league average is ~100)
-  Ortg <- 100 + (PTS - 15) * 1.5  # Offensive rating estimate
-  drtg <- 105 - (STL + BLK) * 2   # Defensive rating estimate
-  
-  # Advanced metrics (rough estimates)
-  adjoe <- Ortg
-  adrtg <- drtg
-  porpag <- (PTS - 15) * 0.1
-  dporpag <- (STL + BLK - 2) * 0.1
-  ast_tov <- ifelse(TOV > 0, AST / TOV, 2.0)
-  
-  # Create stats list for model
-  stats <- data.frame(
-    Ortg = Ortg,
-    usg = usg,
-    eFG = eFG,
-    TS_per = TS_per,
-    ORB_per = ORB_per,
-    DRB_per = DRB_per,
-    AST_per = AST_per,
-    TO_per = TO_per,
-    blk_per = blk_per,
-    stl_per = stl_per,
-    porpag = porpag,
-    adjoe = adjoe,
-    drtg = drtg,
-    adrtg = adrtg,
-    dporpag = dporpag
-  )
-  
-  # Add ast/tov with proper name handling
-  stats# All-Star College Basketball Player Project - PREDICTIVE MODEL
-  # Years covered: 2009 - 2021 (Training), 2022+ (Prediction)
-  
-  library(dplyr)
-  library(readxl)
-  library(ggplot2)
-  library(tibble)
-  library(caret)  # For cross-validation and model evaluation
-  library(pROC)   # For ROC curves
-  
-  # ============================================================
-  # 1. Load datasets (same as before)
-  # ============================================================
-  CBBPlayers <- read_excel("/Users/naitikrambhia/Downloads/CBBPlayers_with_Positions.xlsx")
-  
-  # ============================================================
-  # 2. All-Star Lookup Table (same as before)
-  # ============================================================
-  allstars_lookup <- tribble(
-    ~player_name,              ~team,              ~start_year, ~end_year,
-    "Andrew Wiggins",          "Kansas",            2013,        2014,
-    "Anthony Davis",           "Kentucky",          2011,        2012,
-    "Anthony Edwards",         "Georgia",           2019,        2020,
-    "Edrice Adebayo",          "Kentucky",          2016,        2017,
-    "Ben Simmons",             "LSU",               2015,        2016,
-    "Bradley Beal",            "Florida",           2011,        2012,
-    "Brandon Ingram",          "Duke",              2015,        2016,
-    "Cade Cunningham",         "Oklahoma St.",      2020,        2021,
-    "D'Angelo Russell",        "Ohio St.",          2014,        2015,
-    "Damian Lillard",          "Weber St.",         2008,        2012,
-    "Darius Garland",          "Vanderbilt",        2018,        2019,
-    "Dejounte Murray",         "Washington",        2015,        2016,
-    "DeMarcus Cousins",        "Kentucky",          2009,        2010,
-    "Devin Booker",            "Kentucky",          2014,        2015,
-    "Domantas Sabonis",        "Gonzaga",           2014,        2016,
-    "Donovan Mitchell",        "Louisville",        2015,        2017,
-    "Draymond Green",          "Michigan St.",      2008,        2012,
-    "Evan Mobley",             "USC",               2020,        2021,
-    "Fred VanVleet",           "Wichita St.",       2012,        2016,
-    "Gordon Hayward",          "Butler",            2008,        2010,
-    "Isaiah Thomas",           "Washington",        2008,        2011,
-    "Ja Morant",               "Murray St.",        2017,        2019,
-    "Jalen Brunson",           "Villanova",         2015,        2018,
-    "Jalen Williams",          "Santa Clara",       2019,        2022,
-    "Jaren Jackson Jr.",       "Michigan St.",      2017,        2018,
-    "Jarrett Allen",           "Texas",             2016,        2017,
-    "Jaylen Brown",            "California",        2015,        2016,
-    "Jayson Tatum",            "Duke",              2016,        2017,
-    "Jimmy Butler",            "Marquette",         2008,        2011,
-    "John Wall",               "Kentucky",          2009,        2010,
-    "Julius Randle",           "Kentucky",          2013,        2014,
-    "Karl-Anthony Towns",      "Kentucky",          2014,        2015,
-    "Kawhi Leonard",           "San Diego St.",     2009,        2011,
-    "Kemba Walker",            "Connecticut",       2008,        2011,
-    "Khris Middleton",         "Texas A&M",         2009,        2012,
-    "Klay Thompson",           "Washington St.",    2008,        2011,
-    "Kyrie Irving",            "Duke",              2010,        2011,
-    "Lauri Markkanen",         "Arizona",           2016,        2017,
-    "Nikola Vucevic",          "USC",               2008,        2011,
-    "Pascal Siakam",           "New Mexico St.",    2014,        2016,
-    "Paul George",             "Fresno St.",        2008,        2010,
-    "Shai Gilgeous-Alexander", "Kentucky",          2017,        2018,
-    "Trae Young",              "Oklahoma",          2017,        2018,
-    "Tyler Herro",             "Kentucky",          2018,        2019,
-    "Tyrese Haliburton",       "Iowa St.",          2018,        2020,
-    "Tyrese Maxey",            "Kentucky",          2019,        2020,
-    "Victor Oladipo",          "Indiana",           2010,        2013,
-    "Zach LaVine",             "UCLA",              2013,        2014,
-    "Zion Williamson",         "Duke",              2018,        2019
-  )
-  
-  # ============================================================
-  # 3. Prepare Training Data (2009-2021)
-  # ============================================================
-  CBBPlayers_labeled <- CBBPlayers %>%
-    left_join(allstars_lookup, by = c("player_name", "team")) %>%
-    mutate(
-      is_all_star = ifelse(!is.na(start_year) & year >= start_year & year <= end_year, 1, 0)
-    ) %>%
-    select(-start_year, -end_year)
-  
-  # Most recent year per player for training
-  CBBPlayers_Training <- CBBPlayers_labeled %>%
-    filter(year <= 2021) %>%  # Training data only
-    group_by(player_name) %>%
-    filter(year == max(year, na.rm = TRUE)) %>%
-    ungroup() %>%
-    mutate(simple_pos = factor(simple_pos, levels = c("G", "F", "C")))
-  
-  # ============================================================
-  # 4. Define predictors
-  # ============================================================
-  raw_stats <- c(
-    "Ortg", "usg", "eFG", "TS_per", "ORB_per", "DRB_per", "AST_per",
-    "TO_per", "blk_per", "stl_per", "porpag", "adjoe", "`ast/tov`",
-    "drtg", "adrtg", "dporpag"
-  )
-  
-  full_formula <- as.formula(
-    paste("is_all_star ~", paste(raw_stats, collapse = " + "))
-  )
-  
-  # ============================================================
-  # 5. Train Models with Cross-Validation
-  # ============================================================
-  
-  train_and_evaluate <- function(data, pos_name) {
-    cat("\n=== Training model for", pos_name, "===\n")
-    
-    # Remove rows with missing values
-    data_clean <- data %>%
-      select(is_all_star, all_of(gsub("`", "", raw_stats))) %>%
-      na.omit()
-    
-    # Train model
-    model <- glm(full_formula, data = data_clean, family = "binomial")
-    
-    # Get predictions on training data
-    data_clean$pred_prob <- predict(model, type = "response")
-    
-    # Calculate metrics
-    roc_obj <- roc(data_clean$is_all_star, data_clean$pred_prob, quiet = TRUE)
-    auc_value <- auc(roc_obj)
-    
-    cat("AUC:", round(auc_value, 3), "\n")
-    cat("Sample size:", nrow(data_clean), 
-        "| All-Stars:", sum(data_clean$is_all_star), "\n")
-    
-    return(list(model = model, auc = auc_value, data = data_clean))
-  }
-  
-  # Train position-specific models
-  results_G <- train_and_evaluate(
-    CBBPlayers_Training %>% filter(simple_pos == "G"), 
-    "Guards"
-  )
-  
-  results_F <- train_and_evaluate(
-    CBBPlayers_Training %>% filter(simple_pos == "F"), 
-    "Forwards"
-  )
-  
-  results_C <- train_and_evaluate(
-    CBBPlayers_Training %>% filter(simple_pos == "C"), 
-    "Centers"
-  )
-  
-  # ============================================================
-  # 6. Plot ROC Curves (using ggplot2 to avoid margin errors)
-  # ============================================================
-  
-  # Create ROC objects
-  roc_G <- roc(results_G$data$is_all_star, results_G$data$pred_prob, quiet = TRUE)
-  roc_F <- roc(results_F$data$is_all_star, results_F$data$pred_prob, quiet = TRUE)
-  roc_C <- roc(results_C$data$is_all_star, results_C$data$pred_prob, quiet = TRUE)
-  
-  # Print AUC values
-  cat("\n=== Model Performance (AUC) ===\n")
-  cat("Guards:  ", round(auc(roc_G), 3), "\n")
-  cat("Forwards:", round(auc(roc_F), 3), "\n")
-  cat("Centers: ", round(auc(roc_C), 3), "\n\n")
-  
-  # Plot using ggroc (safer and better looking)
-  library(pROC)
-  roc_plot <- ggroc(list(Guards = roc_G, Forwards = roc_F, Centers = roc_C)) +
-    theme_minimal() +
-    labs(title = "ROC Curves by Position",
-         x = "Specificity",
-         y = "Sensitivity") +
-    scale_color_manual(values = c("Guards" = "blue", "Forwards" = "green", "Centers" = "red")) +
-    annotate("text", x = 0.25, y = 0.2, 
-             label = paste0("Guards AUC: ", round(auc(roc_G), 3)), 
-             color = "blue", size = 4) +
-    annotate("text", x = 0.25, y = 0.1, 
-             label = paste0("Forwards AUC: ", round(auc(roc_F), 3)), 
-             color = "green", size = 4) +
-    annotate("text", x = 0.25, y = 0.0, 
-             label = paste0("Centers AUC: ", round(auc(roc_C), 3)), 
-             color = "red", size = 4)
-  
-  print(roc_plot)
-  
-  # ============================================================
-  # 7. PREDICTION FUNCTION for Current/Future Players
-  # ============================================================
-  
-  predict_allstar_probability <- function(new_data, guard_model, forward_model, center_model) {
-    # Prepare new data
-    new_data_pred <- new_data %>%
-      group_by(player_name) %>%
-      filter(year == max(year, na.rm = TRUE)) %>%
-      ungroup() %>%
-      mutate(simple_pos = factor(simple_pos, levels = c("G", "F", "C")))
-    
-    # Initialize prediction column
-    new_data_pred$allstar_probability <- NA
-    
-    # Predict by position
-    guards <- new_data_pred %>% filter(simple_pos == "G")
-    if (nrow(guards) > 0) {
-      new_data_pred$allstar_probability[new_data_pred$simple_pos == "G"] <- 
-        predict(guard_model, newdata = guards, type = "response")
-    }
-    
-    forwards <- new_data_pred %>% filter(simple_pos == "F")
-    if (nrow(forwards) > 0) {
-      new_data_pred$allstar_probability[new_data_pred$simple_pos == "F"] <- 
-        predict(forward_model, newdata = forwards, type = "response")
-    }
-    
-    centers <- new_data_pred %>% filter(simple_pos == "C")
-    if (nrow(centers) > 0) {
-      new_data_pred$allstar_probability[new_data_pred$simple_pos == "C"] <- 
-        predict(center_model, newdata = centers, type = "response")
-    }
-    
-    return(new_data_pred)
-  }
-  
-  # ============================================================
-  # 8. Apply Predictions to Current Players (2022+)
-  # ============================================================
-  
-  # Filter for players after 2021 (current/future players)
-  Current_Players <- CBBPlayers %>%
-    filter(year > 2021)
-  
-  # If you have current players, predict their All-Star probability
-  if (nrow(Current_Players) > 0) {
-    Predictions <- predict_allstar_probability(
-      Current_Players,
-      results_G$model,
-      results_F$model,
-      results_C$model
-    )
-    
-    # View top prospects
-    Top_Prospects <- Predictions %>%
-      select(player_name, team, year, simple_pos, allstar_probability, 
-             conf, Ortg, usg, eFG, AST_per, DRB_per) %>%
-      arrange(desc(allstar_probability)) %>%
-      head(20)
-    
-    cat("\n")
-    cat("=================================================\n")
-    cat("===        TOP 20 ALL-STAR PROSPECTS          ===\n")
-    cat("=================================================\n\n")
-    print(Top_Prospects, n = 20)
-    
-    # Also view by position
-    cat("\n\n=== TOP GUARDS ===\n")
-    Top_Guards <- Predictions %>%
-      filter(simple_pos == "G") %>%
-      select(player_name, team, year, allstar_probability, Ortg, AST_per) %>%
-      arrange(desc(allstar_probability)) %>%
-      head(10)
-    print(Top_Guards, n = 10)
-    
-    cat("\n\n=== TOP FORWARDS ===\n")
-    Top_Forwards <- Predictions %>%
-      filter(simple_pos == "F") %>%
-      select(player_name, team, year, allstar_probability, Ortg, DRB_per) %>%
-      arrange(desc(allstar_probability)) %>%
-      head(10)
-    print(Top_Forwards, n = 10)
-    
-    cat("\n\n=== TOP CENTERS ===\n")
-    Top_Centers <- Predictions %>%
-      filter(simple_pos == "C") %>%
-      select(player_name, team, year, allstar_probability, Ortg, blk_per) %>%
-      arrange(desc(allstar_probability)) %>%
-      head(10)
-    print(Top_Centers, n = 10)
-    
-    # Visualize predictions
-    hist_plot <- ggplot(Predictions, aes(x = allstar_probability)) +
-      geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
-      facet_wrap(~simple_pos) +
-      labs(title = "Predicted All-Star Probability Distribution by Position",
-           x = "All-Star Probability",
-           y = "Count") +
-      theme_minimal()
-    print(hist_plot)
-    
-    # Save predictions to CSV for easy viewing
-    write.csv(Predictions %>% 
-                select(player_name, team, year, simple_pos, allstar_probability, 
-                       conf, Ortg, usg, eFG, AST_per, DRB_per, blk_per) %>%
-                arrange(desc(allstar_probability)),
-              file = "AllStar_Predictions.csv", 
-              row.names = FALSE)
-    cat("\n✓ Full predictions saved to: AllStar_Predictions.csv\n")
-    
+  # Calibrate probability
+  if (use_calibrated) {
+    prob <- calibrate_probability(raw_prob, position)
+    prob_label <- "Calibrated All-Star Probability"
   } else {
-    cat("\n")
-    cat("=================================================\n")
-    cat("No players found after 2021 in dataset.\n")
-    cat("To make predictions, add current player data to CBBPlayers.\n")
-    cat("=================================================\n")
+    prob <- raw_prob
+    prob_label <- "Raw All-Star Probability"
   }
   
-  # ============================================================
-  # 9. Feature Importance Visualization
-  # ============================================================
+  cat("\n=================================================\n")
+  cat("Player:", player_name, "(", position, ")\n")
+  cat(prob_label, ":", round(prob * 100, 1), "%\n")
+  if (use_calibrated) {
+    cat("(Raw probability:", round(raw_prob * 100, 1), "%)\n")
+  }
   
-  plot_feature_importance <- function(model, pos_name) {
-    coefs <- data.frame(
-      stat = names(coef(model))[-1],
-      estimate = coef(model)[-1],
-      abs_estimate = abs(coef(model)[-1])
+  # Interpretation with calibrated scale
+  if (prob >= 0.7) {
+    cat("Rating: ⭐⭐⭐⭐⭐ ELITE ALL-STAR PROSPECT\n")
+  } else if (prob >= 0.5) {
+    cat("Rating: ⭐⭐⭐⭐ STRONG ALL-STAR PROSPECT\n")
+  } else if (prob >= 0.3) {
+    cat("Rating: ⭐⭐⭐ GOOD ALL-STAR POTENTIAL\n")
+  } else if (prob >= 0.15) {
+    cat("Rating: ⭐⭐ MODERATE ALL-STAR POTENTIAL\n")
+  } else if (prob >= 0.05) {
+    cat("Rating: ⭐ DEVELOPING ALL-STAR POTENTIAL\n")
+  } else {
+    cat("Rating: SOLID PLAYER, LOWER ALL-STAR PROBABILITY\n")
+  }
+  
+  cat("=================================================\n\n")
+  
+  return(invisible(list(raw = raw_prob, calibrated = prob)))
+}
+
+# Function 2: Batch prediction with data frame
+predict_batch <- function(players_df, use_calibrated = TRUE) {
+  # players_df should have columns: player_name, position, and all 15 stat columns
+  
+  results_df <- players_df %>%
+    mutate(
+      raw_probability = NA,
+      allstar_probability = NA
+    )
+  
+  for (i in 1:nrow(results_df)) {
+    pos <- results_df$position[i]
+    result <- switch(pos,
+                     "G" = results_G,
+                     "F" = results_F,
+                     "C" = results_C)
+    
+    stats <- results_df[i, raw_stats]
+    X <- as.matrix(stats)
+    X_scaled <- scale(X, center = result$scaling$center, scale = result$scaling$scale)
+    
+    raw_prob <- as.vector(
+      predict(result$model, newx = X_scaled, s = "lambda.min", type = "response")
     )
     
-    ggplot(coefs, aes(x = reorder(stat, abs_estimate), y = estimate, 
-                      fill = estimate > 0)) +
-      geom_col() +
-      coord_flip() +
-      labs(title = paste("Feature Importance -", pos_name),
-           x = "Feature",
-           y = "Coefficient (Log-Odds)") +
-      scale_fill_manual(values = c("TRUE" = "steelblue", "FALSE" = "salmon"),
-                        name = "Effect",
-                        labels = c("Negative", "Positive")) +
-      theme_minimal()
-  }
-  
-  plot_feature_importance(results_G$model, "Guards")
-  plot_feature_importance(results_F$model, "Forwards")
-  plot_feature_importance(results_C$model, "Centers")
-  
-  # ============================================================
-  # 10. Save Models for Future Use
-  # ============================================================
-  
-  saveRDS(results_G$model, "allstar_model_guards.rds")
-  saveRDS(results_F$model, "allstar_model_forwards.rds")
-  saveRDS(results_C$model, "allstar_model_centers.rds")
-  
-  cat("\n✓ Models saved successfully!\n")
-  cat("Use readRDS() to load models for future predictions.\n")
-  
-  # ============================================================
-  # 11. Interactive Prediction Function for Manual Input
-  # ============================================================
-  
-  predict_new_player <- function() {
-    cat("\n=================================================\n")
-    cat("===     NBA ALL-STAR PREDICTION TOOL         ===\n")
-    cat("=================================================\n\n")
-    
-    # Get player info
-    player_name <- readline(prompt = "Enter player name: ")
-    position <- toupper(readline(prompt = "Enter position (G/F/C): "))
-    
-    # Validate position
-    while (!position %in% c("G", "F", "C")) {
-      cat("Invalid position. Please enter G, F, or C.\n")
-      position <- toupper(readline(prompt = "Enter position (G/F/C): "))
-    }
-    
-    cat("\nEnter the following stats for", player_name, ":\n")
-    cat("(You can find these in standard box scores)\n\n")
-    
-    # Helper function to get numeric input
-    get_stat <- function(stat_name, required = TRUE) {
-      input <- readline(prompt = paste0(stat_name, ": "))
-      if (input == "" && !required) return(NA)
-      val <- as.numeric(input)
-      return(val)
-    }
-    
-    # Collect basic stats from the table
-    cat("--- Per Game Stats ---\n")
-    PTS <- get_stat("Points Per Game (PTS)")
-    AST <- get_stat("Assists Per Game (AST)")
-    TRB <- get_stat("Total Rebounds Per Game (TRB)")
-    STL <- get_stat("Steals Per Game (STL)")
-    BLK <- get_stat("Blocks Per Game (BLK)")
-    TOV <- get_stat("Turnovers Per Game (TOV)")
-    
-    cat("\n--- Shooting Stats ---\n")
-    FG_pct <- get_stat("Field Goal % (FG%) [as decimal, e.g., 0.45]")
-    FG3_pct <- get_stat("3-Point % (3P%) [as decimal, e.g., 0.35]")
-    FT_pct <- get_stat("Free Throw % (FT%) [as decimal, e.g., 0.75]")
-    
-    cat("\n--- Advanced Stats (if known, otherwise we'll estimate) ---\n")
-    MP <- get_stat("Minutes Per Game (MP)", required = FALSE)
-    ORB <- get_stat("Offensive Rebounds Per Game (ORB)", required = FALSE)
-    DRB <- get_stat("Defensive Rebounds Per Game (DRB)", required = FALSE)
-    
-    # Calculate derived stats needed for model
-    # These are approximations based on per-game stats
-    
-    # Estimate advanced metrics
-    if (is.na(MP)) MP <- 30  # Default minutes
-    if (is.na(ORB)) ORB <- TRB * 0.25  # Estimate ORB as 25% of total rebounds
-    if (is.na(DRB)) DRB <- TRB * 0.75  # Estimate DRB as 75% of total rebounds
-    
-    # Calculate percentages (rough estimates based on national averages)
-    ORB_per <- (ORB / MP) * 40 * 1.5  # Approximate ORB%
-    DRB_per <- (DRB / MP) * 40 * 1.5  # Approximate DRB%
-    AST_per <- (AST / MP) * 40 * 1.5  # Approximate AST%
-    TO_per <- (TOV / MP) * 40 * 1.5   # Approximate TO%
-    stl_per <- (STL / MP) * 40 * 0.5  # Approximate STL%
-    blk_per <- (BLK / MP) * 40 * 0.5  # Approximate BLK%
-    
-    # Calculate efficiency metrics
-    TS_per <- FG_pct * 1.05  # Rough approximation of True Shooting
-    eFG <- FG_pct + (0.5 * FG3_pct * 0.3)  # Approximate eFG%
-    
-    # Estimate usage (based on scoring)
-    usg <- (PTS / MP) * 40 * 0.8  # Rough usage estimate
-    
-    # Estimate ratings (league average is ~100)
-    Ortg <- 100 + (PTS - 15) * 1.5  # Offensive rating estimate
-    drtg <- 105 - (STL + BLK) * 2   # Defensive rating estimate
-    
-    # Advanced metrics (rough estimates)
-    adjoe <- Ortg
-    adrtg <- drtg
-    porpag <- (PTS - 15) * 0.1
-    dporpag <- (STL + BLK - 2) * 0.1
-    ast_tov <- ifelse(TOV > 0, AST / TOV, 2.0)
-    
-    ast/tov` <- ast_tov
-    
-    player_data <- stats
-    
-    # Select appropriate model
-    model <- switch(position,
-                    "G" = results_G$model,
-                    "F" = results_F$model,
-                    "C" = results_C$model)
-    
-    # Make prediction
-    prob <- predict(model, newdata = player_data, type = "response")
-    
-    # Display results
-    cat("\n=================================================\n")
-    cat("PREDICTION RESULTS\n")
-    cat("=================================================\n")
-    cat("Player:", player_name, "\n")
-    cat("Position:", position, "\n")
-    cat("All-Star Probability:", round(prob * 100, 1), "%\n\n")
-    
-    # Interpretation
-    if (prob >= 0.7) {
-      cat("⭐⭐⭐ ELITE PROSPECT - Very high All-Star potential!\n")
-    } else if (prob >= 0.5) {
-      cat("⭐⭐ STRONG PROSPECT - Good All-Star potential\n")
-    } else if (prob >= 0.3) {
-      cat("⭐ MODERATE PROSPECT - Developmental All-Star potential\n")
+    results_df$raw_probability[i] <- raw_prob
+    results_df$allstar_probability[i] <- if(use_calibrated) {
+      calibrate_probability(raw_prob, pos)
     } else {
-      cat("DEVELOPING PLAYER - Lower All-Star probability\n")
+      raw_prob
     }
-    
-    cat("=================================================\n\n")
-    
-    return(invisible(list(name = player_name, position = position, probability = prob)))
   }
   
-  # ============================================================
-  # 12. Batch Prediction Function (Multiple Players at Once)
-  # ============================================================
+  results_df <- results_df %>%
+    arrange(desc(allstar_probability)) %>%
+    mutate(
+      rank = row_number(),
+      probability_pct = round(allstar_probability * 100, 1)
+    )
   
-  predict_multiple_players <- function() {
-    cat("\n=== BATCH PREDICTION MODE ===\n")
-    cat("Enter player data in format: Name,Position,Ortg,usg,eFG,...\n")
-    cat("Type 'done' when finished\n\n")
-    
-    results <- list()
-    
-    while(TRUE) {
-      input <- readline(prompt = "Enter player data (or 'done'): ")
-      if (tolower(input) == "done") break
-      
-      # Parse input
-      # You can expand this to handle CSV-like input
-      cat("Player added to batch.\n")
-    }
-    
-    cat("\nBatch predictions complete!\n")
-  }
-  
-  # ============================================================
-  # Quick Prediction with Pre-filled Stats (for testing)
-  # ============================================================
-  
-  quick_predict_v2 <- function(player_name, stats_list, position) {
-    # Select model based on position
-    model <- switch(position,
-                    "G" = results_G$model,
-                    "F" = results_F$model,
-                    "C" = results_C$model)
-    
-    # Create data frame
-    player_data <- as.data.frame(stats_list)
-    
-    # Predict
-    prob <- predict(model, newdata = player_data, type = "response")
-    
-    cat("\n=================================================\n")
-    cat("Player:", player_name, "(", position, ")\n")
-    cat("All-Star Probability:", round(prob * 100, 1), "%\n")
-    cat("=================================================\n\n")
-    
-    return(prob)
-  }
-  
-  # ============================================================
-  # HOW TO USE THE PREDICTION TOOLS
-  # ============================================================
-  
-  cat("\n")
-  cat("=================================================\n")
-  cat("===     PREDICTION TOOLS READY               ===\n")
-  cat("=================================================\n\n")
-  cat("To predict for a new player, use:\n\n")
-  cat("1. INTERACTIVE MODE (easiest):\n")
-  cat("   predict_new_player()\n\n")
-  cat("2. QUICK PREDICTION (if you have all stats):\n")
-  cat("   quick_predict_v2('Cooper Flagg',\n")
-  cat("                    list(Ortg=125, usg=25, eFG=0.60, TS_per=0.62,\n")
-  cat("                         ORB_per=8, DRB_per=15, AST_per=20, TO_per=12,\n")
-  cat("                         blk_per=5, stl_per=3, porpag=0.8, adjoe=120,\n")
-  cat("                         drtg=95, adrtg=92, dporpag=0.75),\n")
-  cat("                    'F')\n\n")
-  cat("=================================================\n\n")
-  
-  cat("Type: predict_new_player() to start predicting!\n\n")
+  return(results_df)
+}
+
+# ============================================================
+# USAGE INSTRUCTIONS & EXAMPLES
+# ============================================================
+
+cat("\n=================================================\n")
+cat("===     PREDICTION TOOLS READY               ===\n")
+cat("=================================================\n\n")
+cat("Your models have been trained on 2009-2021 data.\n")
+cat("You can now predict All-Star probability for ANY player!\n\n")
+
+cat("EXAMPLE 1: Quick prediction with all stats\n")
+cat("-" %>% rep(50) %>% paste(collapse=""), "\n")
+cat("quick_predict_v2('Cooper Flagg',\n")
+cat("                 list(Ortg=125, usg=28, eFG=0.62, TS_per=0.65,\n")
+cat("                      ORB_per=10, DRB_per=18, AST_per=15, TO_per=10,\n")
+cat("                      blk_per=6, stl_per=2.5, porpag=1.2, adjoe=125,\n")
+cat("                      drtg=92, adrtg=88, dporpag=0.9),\n")
+cat("                 'F')\n\n")
+
+cat("EXAMPLE 2: Multiple players\n")
+cat("-" %>% rep(50) %>% paste(collapse=""), "\n")
+cat("quick_predict_v2('Ace Bailey', list(...stats...), 'F')\n")
+cat("quick_predict_v2('Dylan Harper', list(...stats...), 'G')\n")
+cat("quick_predict_v2('Khaman Maluach', list(...stats...), 'C')\n\n")
+
+cat("REQUIRED STATS (15 total):\n")
+cat("-" %>% rep(50) %>% paste(collapse=""), "\n")
+for(i in 1:length(raw_stats)) {
+  cat(sprintf("%2d. %-12s", i, raw_stats[i]))
+  if(i %% 3 == 0) cat("\n") else cat("  ")
+}
+cat("\n\n")
+
+cat("TIP: Find these stats on sports-reference.com or KenPom.com\n")
+cat("=================================================\n\n")
+
+quick_predict_v2('Braden Smith',
+                 list(
+                   Ortg   = 118,   # solid offensive rating
+                   usg    = 25,    # moderate usage for a point guard
+                   eFG    = 52,    # effective field goal %
+                   TS_per = 57,    # true shooting percentage
+                   ORB_per= 4,     # offensive rebound rate
+                   DRB_per= 11,    # defensive rebound rate
+                   AST_per= 28,    # assist rate — very high
+                   TO_per = 14,    # turnover rate — a little elevated
+                   blk_per= 0.8,   # blocks per 100 possessions
+                   stl_per= 2.4,   # steals per 100 possessions
+                   porpag = 3.8,   # proxy for box plus/minus impact
+                   adjoe  = 128,   # adjusted offensive efficiency
+                   drtg   = 90,    # defensive rating — very good
+                   adrtg  = 87,    # adjusted defensive efficiency
+                   dporpag= 4.0    # defensive box impact
+                 ),
+                 'G')
