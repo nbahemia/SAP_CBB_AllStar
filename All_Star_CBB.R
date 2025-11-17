@@ -89,15 +89,26 @@ CBBPlayers_Training <- CBBPlayers_labeled %>%
   mutate(simple_pos = factor(simple_pos, levels = c("G", "F", "C")))
 
 # ============================================================
-# 4. Define predictors (matching descriptive model except ast/tov)
+# 4. Define predictors (including height)
 # ============================================================
-raw_stats <- c(
-  "Ortg", "usg", "eFG", "TS_per", "ORB_per", "DRB_per", "AST_per",
-  "TO_per", "blk_per", "stl_per", "porpag", "adjoe",
-  "drtg", "adrtg", "dporpag"
-)
 
-# Note: This matches the descriptive model's stats, excluding ast/tov
+# Check if height_in column exists and add it
+if ("height_in" %in% names(CBBPlayers_Training)) {
+  raw_stats <- c(
+    "height_in", "Ortg", "usg", "eFG", "TS_per", "ORB_per", "DRB_per", "AST_per",
+    "TO_per", "blk_per", "stl_per", "porpag", "adjoe",
+    "drtg", "adrtg", "dporpag"
+  )
+  cat("✓ Height variable 'height_in' found and added to model (16 stats total)\n\n")
+} else {
+  raw_stats <- c(
+    "Ortg", "usg", "eFG", "TS_per", "ORB_per", "DRB_per", "AST_per",
+    "TO_per", "blk_per", "stl_per", "porpag", "adjoe",
+    "drtg", "adrtg", "dporpag"
+  )
+  cat("⚠ Height variable 'height_in' not found. Using 15 stats without height.\n")
+  cat("Available columns:", paste(head(names(CBBPlayers_Training), 20), collapse=", "), "...\n\n")
+}
 
 full_formula <- as.formula(
   paste("is_all_star ~", paste(raw_stats, collapse = " + "))
@@ -537,10 +548,10 @@ cat("=================================================\n\n")
 cat("Your models have been trained on 2009-2021 data.\n")
 cat("You can now predict All-Star probability for ANY player!\n\n")
 
-cat("EXAMPLE 1: Quick prediction with all stats\n")
+cat("EXAMPLE 1: Quick prediction with all stats (including height)\n")
 cat("-" %>% rep(50) %>% paste(collapse=""), "\n")
 cat("quick_predict_v2('Cooper Flagg',\n")
-cat("                 list(Ortg=125, usg=28, eFG=0.62, TS_per=0.65,\n")
+cat("                 list(height_in=80, Ortg=125, usg=28, eFG=62, TS_per=65,\n")
 cat("                      ORB_per=10, DRB_per=18, AST_per=15, TO_per=10,\n")
 cat("                      blk_per=6, stl_per=2.5, porpag=1.2, adjoe=125,\n")
 cat("                      drtg=92, adrtg=88, dporpag=0.9),\n")
@@ -552,7 +563,7 @@ cat("quick_predict_v2('Ace Bailey', list(...stats...), 'F')\n")
 cat("quick_predict_v2('Dylan Harper', list(...stats...), 'G')\n")
 cat("quick_predict_v2('Khaman Maluach', list(...stats...), 'C')\n\n")
 
-cat("REQUIRED STATS (15 total):\n")
+cat("REQUIRED STATS (16 total with height):\n")
 cat("-" %>% rep(50) %>% paste(collapse=""), "\n")
 for(i in 1:length(raw_stats)) {
   cat(sprintf("%2d. %-12s", i, raw_stats[i]))
@@ -560,25 +571,36 @@ for(i in 1:length(raw_stats)) {
 }
 cat("\n\n")
 
-cat("TIP: Find these stats on sports-reference.com or KenPom.com\n")
+cat("NOTE: height_in should be in inches (e.g., 6'8\" = 80 inches)\n")
+cat("TIP: Find other stats on sports-reference.com or KenPom.com\n")
 cat("=================================================\n\n")
-
-quick_predict_v2('Braden Smith',
+quick_predict_v2('Deandre Ayton',
                  list(
-                   Ortg   = 118,   # solid offensive rating
-                   usg    = 25,    # moderate usage for a point guard
-                   eFG    = 52,    # effective field goal %
-                   TS_per = 57,    # true shooting percentage
-                   ORB_per= 4,     # offensive rebound rate
-                   DRB_per= 11,    # defensive rebound rate
-                   AST_per= 28,    # assist rate — very high
-                   TO_per = 14,    # turnover rate — a little elevated
-                   blk_per= 0.8,   # blocks per 100 possessions
-                   stl_per= 2.4,   # steals per 100 possessions
-                   porpag = 3.8,   # proxy for box plus/minus impact
-                   adjoe  = 128,   # adjusted offensive efficiency
-                   drtg   = 90,    # defensive rating — very good
-                   adrtg  = 87,    # adjusted defensive efficiency
-                   dporpag= 4.0    # defensive box impact
+                   height_in = 83,      # 6'11"
+                   
+                   # Scoring efficiency + usage
+                   Ortg     = 123,      
+                   usg      = 25.4,
+                   eFG      = 61.7,
+                   TS_per   = 65.0,
+                   
+                   # Rebounding
+                   ORB_per  = 9.7,
+                   DRB_per  = 25.0,
+                   
+                   # Playmaking + ball security
+                   AST_per  = 12.4,
+                   TO_per   = 15.2,
+                   
+                   # Defense
+                   blk_per  = 6.1,
+                   stl_per  = 1.0,
+                   
+                   # Overall impact metrics (converted)
+                   porpag   = 6.5,     # elite scorer + rebounder
+                   adjoe    = 133,     # top-tier offensive rating
+                   drtg     = 95,
+                   adrtg    = 92,
+                   dporpag  = 3.8      # solid but not elite defensive impact
                  ),
-                 'G')
+                 'C')
