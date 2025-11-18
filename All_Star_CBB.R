@@ -574,33 +574,26 @@ cat("\n\n")
 cat("NOTE: height_in should be in inches (e.g., 6'8\" = 80 inches)\n")
 cat("TIP: Find other stats on sports-reference.com or KenPom.com\n")
 cat("=================================================\n\n")
-quick_predict_v2('Deandre Ayton',
+quick_predict_v2('Anthony Davis',
                  list(
-                   height_in = 83,      # 6'11"
-                   
-                   # Scoring efficiency + usage
-                   Ortg     = 123,      
-                   usg      = 25.4,
-                   eFG      = 61.7,
-                   TS_per   = 65.0,
-                   
-                   # Rebounding
-                   ORB_per  = 9.7,
-                   DRB_per  = 25.0,
-                   
-                   # Playmaking + ball security
-                   AST_per  = 12.4,
-                   TO_per   = 15.2,
-                   
-                   # Defense
-                   blk_per  = 6.1,
-                   stl_per  = 1.0,
-                   
-                   # Overall impact metrics (converted)
-                   porpag   = 6.5,     # elite scorer + rebounder
-                   adjoe    = 133,     # top-tier offensive rating
-                   drtg     = 95,
-                   adrtg    = 92,
-                   dporpag  = 3.8      # solid but not elite defensive impact
+                   Ortg     = 125,      # Offensive rating
+                   usg      = 28.0,     # Usage %
+                   eFG      = 58.5,     # Effective field goal %
+                   TS_per   = 62.0,     # True shooting %
+                   ORB_per  = 4.0,      # Offensive rebound %
+                   DRB_per  = 15.0,     # Defensive rebound %
+                   AST_per  = 3.0,      # Assist %
+                   TO_per   = 2.5,      # Turnover %
+                   blk_per  = 3.5,      # Blocks %
+                   stl_per  = 1.5,      # Steals %
+                   porpag   = 6.8,      # Player overall RAPM-like impact
+                   adjoe    = 130,      # Adjusted offensive efficiency
+                   drtg     = 95,       # Defensive rating
+                   adrtg    = 92,       # Adjusted defensive rating
+                   dporpag  = 4.0,      # Defensive impact
+                   height_in = 82       # Height in inches (6'10")
                  ),
-                 'C')
+                 'F'
+)
+
+
