@@ -61,7 +61,7 @@ export default function FilterBar({
         >
           <option value="">All Years</option>
           {filters.years.map(y => (
-            <option key={y} value={String(y)}>{y}</option>
+            <option key={y} value={String(y)}>{y - 1}-{y}</option>
           ))}
         </select>
       </div>
