@@ -24,13 +24,27 @@ function formatRaw(key: string, value: number): string {
   return `${Math.round(value * 100) / 100}`
 }
 
+function getOrdinalSuffix(value: number): string {
+  if (value % 100 >= 11 && value % 100 <= 13) return "th"
+  switch (value % 10) {
+    case 1:
+      return "st"
+    case 2:
+      return "nd"
+    case 3:
+      return "rd"
+    default:
+      return "th"
+  }
+}
+
 function CustomTick({ x, y, payload, chartData, mode }: any) {
   const index = chartData.findIndex((d: any) => d.stat === payload.value)
   const d = chartData[index]
   const rawKey = Object.keys(RAW_LABELS)[index]
 
   const valueLabel = d == null ? "" : mode === "percentile"
-    ? `${d.value}th`        // was `${d.value}%`
+    ? `${d.value}${getOrdinalSuffix(d.value)}`
     : formatRaw(rawKey, d.value)
 
   return (
@@ -123,7 +137,7 @@ export default function StatsRadar({ result }: StatsRadarProps) {
               }}
               formatter={(val: number, _: any, props: any) => {
                 const key = props?.payload?.rawKey ?? ""
-                if (mode === "percentile") return [`${val}th percentile`, props.payload.stat]
+                if (mode === "percentile") return [`${val}${getOrdinalSuffix(val)} percentile`, props.payload.stat]
                 return [formatRaw(key, val), props.payload.stat]
               }}
             />
@@ -145,7 +159,7 @@ export default function StatsRadar({ result }: StatsRadarProps) {
                 </p>
                 {percentile != null && (
                   <p className="text-[0.65rem] text-[#2d7dd2] mt-0.5">
-                    {Math.round(percentile)}th pct
+                    {Math.round(percentile)}{getOrdinalSuffix(Math.round(percentile))} percentile
                   </p>
                 )}
               </div>
