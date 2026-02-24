@@ -120,3 +120,22 @@ def predict_manual(player: PlayerInput):
         return {"all_star_probability": round(prob * 100, 1)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# ── Extracting Important Stats for Positions ────────────────────────────────
+
+@app.get("/model-info/{position}")
+def model_info(position: str):
+    position = position.upper()
+    if position not in ["G", "F", "C"]:
+        raise HTTPException(status_code=400, detail="Invalid position")
+    model = load_model(position)
+    lr = model.named_steps["model"]
+    features = [
+        "height_in", "Ortg", "usg", "eFG", "TS_per",
+        "ORB_per", "DRB_per", "AST_per", "TO_per",
+        "blk_per", "stl_per", "porpag", "adjoe",
+        "drtg", "adrtg", "dporpag"
+    ]
+    coefs = list(zip(features, lr.coef_[0].tolist()))
+    top = sorted(coefs, key=lambda x: abs(x[1]), reverse=True)[:5]
+    return {"position": position, "top_features": [f for f, _ in top]}
