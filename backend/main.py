@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import pandas as pd
-from backend.utils import load_model
-from backend.database import init_db, get_filters, get_players, get_player_stats
+from utils import load_model
+from database import init_db, get_filters, get_players, get_player_stats
 
 app = FastAPI(title="CBB Player Prediction API")
 

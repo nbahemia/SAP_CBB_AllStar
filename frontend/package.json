@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "backend": "uvicorn main:app --reload --app-dir ../backend",
+    "start": "concurrently \"npm run backend\" \"npm run dev\""
   },
   "dependencies": {
     "react": "^19.2.0",

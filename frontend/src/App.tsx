@@ -5,7 +5,6 @@ import FilterBar from "./components/FilterBar"
 import PlayerSelect from "./components/PlayerSelect"
 import PlayerCard from "./components/PlayerCard"
 import StatsRadar from "./components/StatsRadar"
-import StatPills from "./components/StatsPills"
 
 
 export default function App() {
@@ -134,7 +133,7 @@ export default function App() {
             <div className="flex flex-col gap-6">
               <PlayerCard result={result} />
               <StatsRadar result={result} />
-              <StatPills result={result} />
+
             </div>
           )}
         </div>

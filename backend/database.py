@@ -2,8 +2,10 @@ import sqlite3
 import pandas as pd
 import os
 
-DB_PATH = "cbb.db"
-CSV_PATH = "data/CBB_labeled.csv"
+# Build path relative to this file's location
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(BASE_DIR, "data", "CBB_labeled.csv")
+DB_PATH = os.path.join(BASE_DIR, "cbb.db")
 
 def init_db():
     """Load CSV into SQLite if not already done."""

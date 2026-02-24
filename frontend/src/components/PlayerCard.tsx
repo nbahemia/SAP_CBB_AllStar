@@ -13,12 +13,12 @@ const POSITION_LABELS: Record<string, string> = {
 
 export default function PlayerCard({ result }: PlayerCardProps) {
   return (
-    <div className="bg-[#0f1e30] border border-[#1e3a5f] rounded-2xl p-6 flex justify-between items-center">
+    <div className="bg-[#0f1e30] border border-[#1e3a5f] rounded-2xl p-4 flex justify-between items-center">
       <div>
-        <h2 className="text-3xl font-black tracking-widest leading-none uppercase">
+        <h2 className="text-xl font-black tracking-widest leading-none uppercase">
           {result.player_name}
         </h2>
-        <p className="text-sm text-[#7a8fa6] mt-1.5 tracking-wide">
+        <p className="text-xs text-[#7a8fa6] mt-1 tracking-wide">
           {result.team} · {POSITION_LABELS[result.position] ?? result.position} · {result.year}
         </p>
       </div>
