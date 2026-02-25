@@ -73,7 +73,7 @@ for pos in positions:
         ("model", LogisticRegression(
             penalty="l2",
             solver="liblinear",
-            class_weight="balanced"
+            class_weight={0: 1, 1: 20}  # tune this number down from ~50 that balanced uses
         ))
     ])
 
