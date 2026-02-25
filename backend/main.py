@@ -25,7 +25,8 @@ FEATURES = [
     "height_in", "Ortg", "usg", "eFG", "TS_per",
     "ORB_per", "DRB_per", "AST_per", "TO_per",
     "blk_per", "stl_per", "porpag", "adjoe",
-    "drtg", "adrtg", "dporpag"
+    "drtg", "adrtg", "dporpag",
+    "bpm", "ast_tov"
 ]
 
 PERCENTILE_FEATURES = [
@@ -35,13 +36,13 @@ PERCENTILE_FEATURES = [
     "drtg_percentile", "adrtg_percentile", "dporpag_percentile"
 ]
 
-# ── Filter options ────────────────────────────────────────────────────────────
+# ── Filter options ─────────────────────────────────────────────────────────────
 
 @app.get("/filters")
 def filters():
     return get_filters()
 
-# ── Player list ───────────────────────────────────────────────────────────────
+# ── Player list ────────────────────────────────────────────────────────────────
 
 @app.get("/players")
 def players(
@@ -51,7 +52,7 @@ def players(
 ):
     return get_players(position=position, team=team, year=year)
 
-# ── Predict by pid + year ─────────────────────────────────────────────────────
+# ── Predict by pid + year ──────────────────────────────────────────────────────
 
 class PredictRequest(BaseModel):
     pid: int
@@ -67,6 +68,15 @@ def predict(req: PredictRequest):
     if pos not in ["G", "F", "C"]:
         raise HTTPException(status_code=400, detail=f"Invalid position: {pos}")
 
+    # Invert lower-is-better stats to match training
+    row["drtg"]   = -row["drtg"]
+    row["adrtg"]  = -row["adrtg"]
+    row["TO_per"] = -row["TO_per"]
+
+    # Handle ast/tov column rename
+    if "ast/tov" in row and "ast_tov" not in row:
+        row["ast_tov"] = row["ast/tov"]
+
     try:
         model = load_model(pos)
         features = pd.DataFrame([row])[FEATURES]
@@ -74,7 +84,7 @@ def predict(req: PredictRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Raw stats for the chart
+    # Raw stats for the chart (exclude height, include bpm and ast_tov)
     raw_stats = {f: row.get(f) for f in FEATURES if f != "height_in"}
 
     # Percentile stats for the chart
@@ -90,7 +100,7 @@ def predict(req: PredictRequest):
         "percentile_stats": percentile_stats,
     }
 
-# ── Manual predict (keep original for testing) ────────────────────────────────
+# ── Manual predict ─────────────────────────────────────────────────────────────
 
 class PlayerInput(BaseModel):
     simple_pos: str
@@ -110,18 +120,24 @@ class PlayerInput(BaseModel):
     drtg: float
     adrtg: float
     dporpag: float
+    bpm: float
+    ast_tov: float
 
 @app.post("/predict/manual")
 def predict_manual(player: PlayerInput):
     try:
-        model = load_model(player.simple_pos)
-        features = pd.DataFrame([player.dict()])[FEATURES]
+        data = player.dict()
+        data["drtg"]   = -data["drtg"]
+        data["adrtg"]  = -data["adrtg"]
+        data["TO_per"] = -data["TO_per"]
+        model = load_model(data["simple_pos"])
+        features = pd.DataFrame([data])[FEATURES]
         prob = float(model.predict_proba(features)[:, 1][0])
         return {"all_star_probability": round(prob * 100, 1)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# ── Extracting Important Stats for Positions ────────────────────────────────
+# ── Model feature importance ───────────────────────────────────────────────────
 
 @app.get("/model-info/{position}")
 def model_info(position: str):
@@ -134,7 +150,8 @@ def model_info(position: str):
         "height_in", "Ortg", "usg", "eFG", "TS_per",
         "ORB_per", "DRB_per", "AST_per", "TO_per",
         "blk_per", "stl_per", "porpag", "adjoe",
-        "drtg", "adrtg", "dporpag"
+        "drtg", "adrtg", "dporpag",
+        "bpm", "ast_tov"
     ]
     coefs = list(zip(features, lr.coef_[0].tolist()))
     top = sorted(coefs, key=lambda x: abs(x[1]), reverse=True)[:5]

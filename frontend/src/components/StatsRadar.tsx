@@ -19,6 +19,7 @@ interface StatsRadarProps {
 type ViewMode = "percentile" | "raw" | "stats"
 
 const PCT_STATS = ["eFG", "TS_per", "ORB_per", "DRB_per", "AST_per", "TO_per", "blk_per", "stl_per", "usg"]
+const INVERT_PERCENTILES = ["TO_per_percentile", "drtg_percentile", "adrtg_percentile"]
 
 function formatRaw(key: string, value: number): string {
   if (PCT_STATS.includes(key)) return `${Math.round(value * 100) / 100}%`
@@ -33,6 +34,11 @@ function getOrdinalSuffix(value: number): string {
     case 3: return "rd"
     default: return "th"
   }
+}
+
+function getPercentile(key: string, raw: number | null | undefined): number | null {
+  if (raw == null) return null
+  return INVERT_PERCENTILES.includes(key) ? 100 - raw : raw
 }
 
 function CustomTick({ x, y, payload, chartData, mode, topFeatures }: any) {
@@ -72,16 +78,20 @@ export default function StatsRadar({ result }: StatsRadarProps) {
   const chartData =
     mode === "raw"
       ? Object.entries(RAW_LABELS).map(([key, label]) => ({
-        stat: label,
-        value: result.raw_stats?.[key] != null ? Math.round(result.raw_stats[key] * 100) / 100 : 0,
-        rawKey: key,
-      }))
-      : Object.entries(PERCENTILE_LABELS).map(([key, label]) => ({
-        stat: label,
-        value: result.percentile_stats?.[key] != null ? Math.round(result.percentile_stats[key] * 100) / 100 : 0,
-        fullMark: 100,
-        rawKey: key,
-      }))
+          stat: label,
+          value: result.raw_stats?.[key] != null ? Math.round(result.raw_stats[key] * 100) / 100 : 0,
+          rawKey: key,
+        }))
+      : Object.entries(PERCENTILE_LABELS).map(([key, label]) => {
+          const raw = result.percentile_stats?.[key] ?? null
+          const value = getPercentile(key, raw) ?? 0
+          return {
+            stat: label,
+            value: Math.round(value * 100) / 100,
+            fullMark: 100,
+            rawKey: key,
+          }
+        })
 
   const tabs: { key: ViewMode; label: string }[] = [
     { key: "percentile", label: "Percentile" },
@@ -101,10 +111,11 @@ export default function StatsRadar({ result }: StatsRadarProps) {
             <button
               key={t.key}
               onClick={() => setMode(t.key)}
-              className={`px-4 py-1.5 rounded-md text-xs border transition-all ${mode === t.key
+              className={`px-4 py-1.5 rounded-md text-xs border transition-all ${
+                mode === t.key
                   ? "bg-[#1e3a5f] text-[#e8f0fe] border-[#2d7dd2]"
                   : "bg-transparent text-[#7a8fa6] border-[#1e3a5f] hover:border-[#2d7dd2]"
-                }`}
+              }`}
             >
               {t.label}
             </button>
@@ -171,15 +182,16 @@ export default function StatsRadar({ result }: StatsRadarProps) {
           {Object.entries(RAW_LABELS).map(([key, label]) => {
             const percentileKey = `${key}_percentile`
             const raw = result.raw_stats?.[key]
-            const percentile = result.percentile_stats?.[percentileKey]
+            const percentile = getPercentile(percentileKey, result.percentile_stats?.[percentileKey])
             const isImportant = topFeatures.includes(key)
             return (
               <div
                 key={key}
-                className={`rounded-lg px-3 py-2.5 border transition-all ${isImportant
+                className={`rounded-lg px-3 py-2.5 border transition-all ${
+                  isImportant
                     ? "bg-[#1a1a00] border-[#f5c518] shadow-[0_0_12px_rgba(245,197,24,0.15)]"
                     : "bg-[#080f1a] border-[#1e3a5f]"
-                  }`}
+                }`}
               >
                 <p className={`text-[0.7rem] mb-1 flex items-center gap-1 ${isImportant ? "text-[#f5c518]" : "text-[#7a8fa6]"}`}>
                   {isImportant && <span>★</span>}
