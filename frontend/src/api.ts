@@ -35,3 +35,12 @@ export async function predict(pid: number, year: number): Promise<PredictResult>
   if (!res.ok) throw new Error((await res.json()).detail)
   return res.json()
 }
+
+export async function getModelInfo(position: string): Promise<{ top_features: string[] }> {
+  const res = await fetch(`${BASE}/model-info/${position}`)
+  if (!res.ok) throw new Error("Failed to load model info")
+  const data = await res.json()
+  // Handle if backend returns tuples instead of strings
+  const top_features = data.top_features.map((f: any) => Array.isArray(f) ? f[0] : f)
+  return { top_features }
+}

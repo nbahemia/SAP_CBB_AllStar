@@ -1,4 +1,4 @@
-export const RAW_LABELS = {
+export const RAW_LABELS: Record<string, string> = {
   Ortg: "Off Rating",
   usg: "Usage %",
   eFG: "eFG%",
@@ -14,9 +14,11 @@ export const RAW_LABELS = {
   drtg: "Def Rating",
   adrtg: "Adj DRtg",
   dporpag: "D-PORPAG",
+  bpm: "BPM",
+  ast_tov: "AST/TOV",
 }
 
-export const PERCENTILE_LABELS = {
+export const PERCENTILE_LABELS: Record<string, string> = {
   Ortg_percentile: "Off Rating",
   usg_percentile: "Usage",
   eFG_percentile: "eFG%",

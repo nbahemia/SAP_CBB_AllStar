@@ -12,6 +12,7 @@ def init_db():
     if os.path.exists(DB_PATH):
         return
     df = pd.read_csv(CSV_PATH)
+    df = df.rename(columns={"ast/tov": "ast_tov"})  # ← add this
     conn = sqlite3.connect(DB_PATH)
     df.to_sql("players", conn, if_exists="replace", index=False)
     conn.close()
