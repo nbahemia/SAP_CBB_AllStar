@@ -7,6 +7,7 @@ A full-stack machine learning web application that predicts the probability of a
 ## Demo
 
 <img width="3366" height="1702" alt="image" src="https://github.com/user-attachments/assets/01e0f489-1243-4fc4-8fb3-9dd195c41c25" />
+
 > Select a player by position, team, and year — the model returns an All-Star probability score along with a radar chart of their statistical profile.
 
 ---
