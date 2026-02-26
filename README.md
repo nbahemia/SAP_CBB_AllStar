@@ -49,7 +49,7 @@ Players labeled as All-Stars include names like Anthony Davis, Ja Morant, Zion W
 SAP_CBB_AllStar/
 ├── backend/
 │   ├── main.py           # FastAPI app — prediction & filter endpoints
-│   ├── train_model.py          # Model training script
+│   ├── train_model.py    # Model training script
 │   ├── utils.py          # Model loader with in-memory caching
 │   ├── database.py       # SQLite DB init and query functions
 │   ├── data/
